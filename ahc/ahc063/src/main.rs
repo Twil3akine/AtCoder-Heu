@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 // =============================================
 // Scanner & Macros
 // =============================================
-
 pub struct Scanner<R: std::io::BufRead> {
     pub reader: R,
     pub buf_str: Vec<u8>,
@@ -21,16 +20,13 @@ impl<R: std::io::BufRead> Scanner<R> {
             buf_iter: "".split_whitespace(),
         }
     }
-
     pub fn token<T: std::str::FromStr>(&mut self) -> T {
         loop {
             if let Some(token) = self.buf_iter.next() {
                 return token.parse().ok().expect("Failed to parse token");
             }
             self.buf_str.clear();
-            self.reader
-                .read_until(b'\n', &mut self.buf_str)
-                .expect("Failed to read line");
+            self.reader.read_until(b'\n', &mut self.buf_str).unwrap();
             self.buf_iter = unsafe {
                 let slice = std::str::from_utf8_unchecked(&self.buf_str);
                 std::mem::transmute(slice.split_whitespace())
@@ -38,7 +34,6 @@ impl<R: std::io::BufRead> Scanner<R> {
         }
     }
 }
-
 impl Scanner<std::io::StdinLock<'static>> {
     pub fn new() -> Self {
         Self::with_reader(stdin().lock())
@@ -47,21 +42,16 @@ impl Scanner<std::io::StdinLock<'static>> {
 
 #[macro_export]
 macro_rules! read_value {
-    ($sc:expr, ($($t:tt),*)) => { ( $(read_value!($sc, $t)),* ) };
-    ($sc:expr, [$t:tt; $len:expr]) => { (0..$len).map(|_| read_value!($sc, $t)).collect::<Vec<_>>() };
-    ($sc:expr, chars) => { $sc.token::<String>().chars().collect::<Vec<char>>() };
-    ($sc:expr, usize1) => { $sc.token::<usize>() - 1 };
-    ($sc:expr, isize1) => { $sc.token::<isize>() - 1 };
-    ($sc:expr, $t:ty) => { $sc.token::<$t>() };
+    ($sc:expr, [$t:tt; $len:expr]) => {
+        (0..$len).map(|_| read_value!($sc, $t)).collect::<Vec<_>>()
+    };
+    ($sc:expr, $t:ty) => {
+        $sc.token::<$t>()
+    };
 }
 
 #[macro_export]
 macro_rules! input {
-    ($sc:expr $(,)*) => {};
-    ($sc:expr, mut $($var:ident),+ : $t:tt $(, $($r:tt)*)?) => {
-        $( let mut $var = read_value!($sc, $t); )+
-        $(input!($sc, $($r)*);)?
-    };
     ($sc:expr, $($var:ident),+ : $t:tt $(, $($r:tt)*)?) => {
         $( let $var = read_value!($sc, $t); )+
         $(input!($sc, $($r)*);)?
@@ -78,7 +68,6 @@ const BEAM_WIDTH: usize = 1000;
 const DIJ: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)]; // U, D, L, R
 const DIR_CHARS: [char; 4] = ['U', 'D', 'L', 'R'];
 
-// 簡易Xorshift（外部クレート不要の高速乱数）
 struct XorShift(u32);
 impl XorShift {
     fn new(seed: u32) -> Self {
@@ -105,112 +94,105 @@ pub struct Input {
 }
 
 pub fn parse_input<R: BufRead>(sc: &mut Scanner<R>) -> Input {
-    input! {
-        sc,
-        N: usize, M: usize, C: usize,
-        d: [usize; M],
-        f: [[usize; N]; N],
-    }
+    input! { sc, N: usize, M: usize, C: usize, d: [usize; M], f: [[usize; N]; N] }
     Input { N, M, C, d, f }
 }
 
 // ---------------------------------------------------------
-// 上位レイヤー：焼きなまし法による「食べる順番」の最適化
+// Bitboard Utils
+// ---------------------------------------------------------
+#[inline(always)]
+fn set_bit(bits: &mut [u64; 4], pos: u8) {
+    bits[(pos >> 6) as usize] |= 1 << (pos & 63);
+}
+
+#[inline(always)]
+fn clear_bit(bits: &mut [u64; 4], pos: u8) {
+    bits[(pos >> 6) as usize] &= !(1 << (pos & 63));
+}
+
+#[inline(always)]
+fn get_bit(bits: &[u64; 4], pos: u8) -> bool {
+    (bits[(pos >> 6) as usize] >> (pos & 63)) & 1 != 0
+}
+
+// ---------------------------------------------------------
+// 上位レイヤー：焼きなまし法 (変更なしのため一部省略形)
 // ---------------------------------------------------------
 fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
     let start = Instant::now();
     let mut rng = XorShift::new(42);
-
-    let mut foods_by_color = vec![vec![]; input.C + 1];
+    let mut foods = vec![vec![]; input.C + 1];
     for i in 0..input.N {
         for j in 0..input.N {
-            let color = input.f[i][j];
-            if color > 0 {
-                foods_by_color[color].push((i as isize, j as isize));
+            if input.f[i][j] > 0 {
+                foods[input.f[i][j]].push((i as isize, j as isize));
             }
         }
     }
-
-    // 初期解の作成
     let mut targets = vec![(0isize, 0isize); input.M];
-    targets[4] = (4, 0); // 初期状態の頭の位置
-    let mut color_usage = vec![0; input.C + 1];
-
+    targets[4] = (4, 0);
+    let mut usage = vec![0; input.C + 1];
     for k in 5..input.M {
         let c = input.d[k];
-        let idx = color_usage[c];
-        color_usage[c] += 1;
-        targets[k] = foods_by_color[c][idx];
+        targets[k] = foods[c][usage[c]];
+        usage[c] += 1;
     }
-
     let calc_score = |t: &[(isize, isize)]| -> i32 {
-        let mut score = 0;
-        for k in 5..input.M {
-            score += (t[k].0 - t[k - 1].0).abs() + (t[k].1 - t[k - 1].1).abs();
-        }
-        score as i32
+        (5..input.M)
+            .map(|k| {
+                (t[k].0 as i32 - t[k - 1].0 as i32).abs()
+                    + (t[k].1 as i32 - t[k - 1].1 as i32).abs()
+            })
+            .sum()
     };
-
-    let mut current_score = calc_score(&targets);
+    let mut cur_score = calc_score(&targets);
     let mut best_targets = targets.clone();
-    let mut best_score = current_score;
+    let mut best_score = cur_score;
 
-    // スワップ可能な（同色の）インデックス群
-    let mut indices_by_color = vec![vec![]; input.C + 1];
+    let mut pool_by_color = vec![vec![]; input.C + 1];
     for k in 5..input.M {
-        indices_by_color[input.d[k]].push(k);
+        pool_by_color[input.d[k]].push(k);
     }
-    let valid_colors: Vec<usize> = (1..=input.C)
-        .filter(|&c| indices_by_color[c].len() >= 2)
+    let valid: Vec<usize> = (1..=input.C)
+        .filter(|&c| pool_by_color[c].len() >= 2)
         .collect();
 
-    if !valid_colors.is_empty() {
-        let t0 = 10.0;
-        let t1 = 0.1;
+    if !valid.is_empty() {
+        let (t0, t1) = (10.0, 0.1);
         let mut iter = 0;
-
         loop {
             if iter & 127 == 0 && start.elapsed() >= time_limit {
                 break;
             }
             iter += 1;
-
-            let c = valid_colors[rng.next_usize(valid_colors.len())];
-            let pool = &indices_by_color[c];
-            let i_idx = rng.next_usize(pool.len());
-            let mut j_idx = rng.next_usize(pool.len());
-            while i_idx == j_idx {
-                j_idx = rng.next_usize(pool.len());
+            let c = valid[rng.next_usize(valid.len())];
+            let pool = &pool_by_color[c];
+            let u = pool[rng.next_usize(pool.len())];
+            let mut v = pool[rng.next_usize(pool.len())];
+            while u == v {
+                v = pool[rng.next_usize(pool.len())];
             }
-
-            let u = pool[i_idx];
-            let v = pool[j_idx];
 
             targets.swap(u, v);
             let next_score = calc_score(&targets);
-
-            let accept = if next_score <= current_score {
-                true
-            } else {
+            let accept = next_score <= cur_score || {
                 let temp =
                     t0 + (t1 - t0) * (start.elapsed().as_secs_f64() / time_limit.as_secs_f64());
-                let prob = f64::exp((current_score - next_score) as f64 / temp);
-                (rng.next() as f64 / std::u32::MAX as f64) < prob
+                (rng.next() as f64 / std::u32::MAX as f64)
+                    < f64::exp((cur_score - next_score) as f64 / temp)
             };
-
             if accept {
-                current_score = next_score;
-                if current_score < best_score {
-                    best_score = current_score;
+                cur_score = next_score;
+                if cur_score < best_score {
+                    best_score = cur_score;
                     best_targets.copy_from_slice(&targets);
                 }
             } else {
-                targets.swap(u, v); // 棄却なら戻す
+                targets.swap(u, v);
             }
         }
     }
-
-    // 1D座標(0~255)に変換して返す
     best_targets
         .iter()
         .map(|&(i, j)| (i * 16 + j) as u8)
@@ -218,13 +200,15 @@ fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------
-// 下位レイヤー：ビームサーチ用状態管理
+// 下位レイヤー：ビームサーチ用状態管理 (最適化版)
 // ---------------------------------------------------------
 #[derive(Clone)]
 struct State {
     f: [u8; 256],
-    ij: [u8; 256],
+    ij: [u8; 256], // リングバッファ化
     c: [u8; 256],
+    body_bits: [u64; 4], // Bitboard導入
+    head_ptr: u8,        // リングバッファの先頭インデックス
     len: usize,
     turn: usize,
     score: i64,
@@ -241,19 +225,21 @@ impl State {
         }
 
         let mut ij = [0u8; 256];
+        let mut body_bits = [0u64; 4];
         for i in 0..5 {
-            ij[i] = ((4 - i) * 16) as u8;
+            let pos = ((4 - i) * 16) as u8;
+            ij[i] = pos;
+            set_bit(&mut body_bits, pos);
         }
 
-        let mut c = [0u8; 256];
-        for i in 0..5 {
-            c[i] = 1;
-        }
+        let c = [1u8; 256];
 
         let mut state = Self {
             f,
             ij,
             c,
+            body_bits,
+            head_ptr: 0,
             len: 5,
             turn: 0,
             score: 0,
@@ -263,8 +249,14 @@ impl State {
         state
     }
 
+    // リングバッファから特定のインデックスの座標を取得する O(1)
+    #[inline(always)]
+    fn get_pos(&self, idx: usize) -> u8 {
+        self.ij[self.head_ptr.wrapping_add(idx as u8) as usize]
+    }
+
     fn apply(&mut self, dir: usize, input: &Input, target_seq: &[u8]) -> bool {
-        let head_pos = self.ij[0];
+        let head_pos = self.get_pos(0);
         let hi = (head_pos / 16) as isize;
         let hj = (head_pos % 16) as isize;
         let (di, dj) = DIJ[dir];
@@ -276,40 +268,45 @@ impl State {
         }
 
         let new_pos = (ni * 16 + nj) as u8;
-        if self.len > 1 && new_pos == self.ij[1] {
+        if self.len > 1 && new_pos == self.get_pos(1) {
             return false;
-        }
+        } // Uターン禁止
 
         let eaten_color = self.f[new_pos as usize];
 
         if eaten_color != 0 {
+            // 食事：長さが伸びるため尻尾はそのまま
             self.f[new_pos as usize] = 0;
-            self.ij.copy_within(0..self.len, 1);
-            self.ij[0] = new_pos;
+            self.head_ptr = self.head_ptr.wrapping_sub(1);
+            self.ij[self.head_ptr as usize] = new_pos;
             self.c[self.len] = eaten_color;
             self.len += 1;
+            set_bit(&mut self.body_bits, new_pos);
         } else {
-            self.ij.copy_within(0..self.len - 1, 1);
-            self.ij[0] = new_pos;
+            // 移動：尻尾が離れるのでBitboardから消す（噛みちぎり判定の前に消すのが味噌）
+            let tail_pos = self.get_pos(self.len - 1);
+            clear_bit(&mut self.body_bits, tail_pos);
+            self.head_ptr = self.head_ptr.wrapping_sub(1);
+            self.ij[self.head_ptr as usize] = new_pos;
+            set_bit(&mut self.body_bits, new_pos);
         }
 
-        // 噛みちぎりチェック
-        if self.len >= 3 {
-            let mut bite_idx = None;
-            for h in 1..=(self.len - 2) {
-                if self.ij[h] == new_pos {
-                    bite_idx = Some(h);
+        // 噛みちぎりチェック (Bitboardにより衝突判定がO(1))
+        if self.len >= 3 && get_bit(&self.body_bits, new_pos) {
+            let mut bite_idx = 0;
+            for h in 1..self.len - 1 {
+                if self.get_pos(h) == new_pos {
+                    bite_idx = h;
                     break;
                 }
             }
-
-            if let Some(h) = bite_idx {
-                for p in h + 1..self.len {
-                    let pos = self.ij[p];
-                    let col = self.c[p];
-                    self.f[pos as usize] = col;
+            if bite_idx > 0 {
+                for p in bite_idx + 1..self.len {
+                    let pos = self.get_pos(p);
+                    self.f[pos as usize] = self.c[p];
+                    clear_bit(&mut self.body_bits, pos); // Bitboardからも削除
                 }
-                self.len = h + 1;
+                self.len = bite_idx + 1;
             }
         }
 
@@ -319,6 +316,7 @@ impl State {
         true
     }
 
+    // Bitboardの恩恵で最軽量化されたBFS
     fn bfs_to_target(&self, input: &Input, target: u8) -> i32 {
         if target == 255 {
             return 255;
@@ -328,15 +326,10 @@ impl State {
         let mut head = 0;
         let mut tail = 0;
 
-        let start = self.ij[0];
+        let start = self.get_pos(0);
         dist[start as usize] = 0;
         q[tail] = start;
         tail += 1;
-
-        let mut is_body = [false; 256];
-        for i in 1..self.len {
-            is_body[self.ij[i] as usize] = true;
-        }
 
         while head < tail {
             let u = q[head];
@@ -354,10 +347,11 @@ impl State {
                 let ni = ui + di;
                 let nj = uj + dj;
                 if ni >= 0 && ni < input.N as isize && nj >= 0 && nj < input.N as isize {
-                    let v = (ni * 16 + nj) as usize;
-                    if !is_body[v] && dist[v] == 255 {
-                        dist[v] = d + 1;
-                        q[tail] = v as u8;
+                    let v = (ni * 16 + nj) as u8;
+                    // 配列ではなくビット演算で障害物確認
+                    if dist[v as usize] == 255 && !get_bit(&self.body_bits, v) {
+                        dist[v as usize] = d + 1;
+                        q[tail] = v;
                         tail += 1;
                     }
                 }
@@ -374,7 +368,6 @@ impl State {
             }
         }
 
-        // 競技ルールの絶対スコア（長不足は2万点ペナルティ）
         let base = self.turn as i64 + 10000 * (e as i64 + 2 * (input.M as i64 - self.len as i64));
 
         let mut dist_penalty = 0;
@@ -382,14 +375,13 @@ impl State {
             let expected_pos = target_seq[self.len];
             let target_color = input.d[self.len] as u8;
 
-            // SAで決めた位置に目当ての色が本当にあるか確認（噛みちぎり等でズレた場合のフォールバック）
             let actual_target = if self.f[expected_pos as usize] == target_color {
                 expected_pos
             } else {
                 let mut best_pos = 255;
                 let mut min_d = 1000;
-                let hi = (self.ij[0] / 16) as isize;
-                let hj = (self.ij[0] % 16) as isize;
+                let hi = (self.get_pos(0) / 16) as isize;
+                let hj = (self.get_pos(0) % 16) as isize;
                 for i in 0..input.N {
                     for j in 0..input.N {
                         let idx = i * 16 + j;
@@ -407,12 +399,11 @@ impl State {
 
             let bfs_dist = self.bfs_to_target(input, actual_target);
             dist_penalty = if bfs_dist == 255 {
-                10000 // 障害物で塞がれている場合は大きなペナルティ（噛みちぎりを誘発）
+                10000
             } else {
                 bfs_dist as i64 * 10
             };
         }
-
         base + dist_penalty
     }
 }
@@ -425,10 +416,8 @@ fn main() {
     let mut sc = Scanner::new();
     let input = parse_input(&mut sc);
 
-    // 1. 上位レイヤー：焼きなまし法でターゲット座標の順序を最適化（100ms使用）
     let target_seq = optimize_targets(&input, sa_time_limit);
 
-    // 2. 下位レイヤー：ビームサーチ（残り時間使用）
     let initial_state = State::new(&input, &target_seq);
     let mut beam = vec![initial_state];
     let mut best_state = beam[0].clone();
@@ -461,17 +450,19 @@ fn main() {
             break;
         }
 
-        next_beam.sort_unstable_by_key(|s| s.score);
+        // [最適化4] 構造体そのものではなく「インデックス」だけをソートしてメモリ帯域を節約
+        let mut indices: Vec<usize> = (0..next_beam.len()).collect();
+        indices.sort_unstable_by_key(|&i| next_beam[i].score);
 
         let mut unique_states = Vec::with_capacity(BEAM_WIDTH);
         seen.fill(false);
 
-        // 重複排除：同じ頭の位置＆同じ長さのものは、一番スコアが良いものだけ残す
-        for state in next_beam {
-            let key = (state.ij[0] as usize) << 8 | state.len;
+        for &i in &indices {
+            let state = &next_beam[i];
+            let key = (state.get_pos(0) as usize) << 8 | state.len;
             if !seen[key] {
                 seen[key] = true;
-                unique_states.push(state);
+                unique_states.push(state.clone());
                 if unique_states.len() == BEAM_WIDTH {
                     break;
                 }
