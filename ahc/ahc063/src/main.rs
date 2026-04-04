@@ -63,8 +63,8 @@ macro_rules! input {
 // Main Logic
 // =============================================
 
-const TIME_LIMIT_MS: u64 = 1900;
-const SA_TIME_LIMIT_MS: u64 = 800;
+const TIME_LIMIT_MS: u64 = 1950;
+const SA_TIME_LIMIT_MS: u64 = 200;
 const DIJ: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)]; // U, D, L, R
 const DIR_CHARS: [char; 4] = ['U', 'D', 'L', 'R'];
 
@@ -496,7 +496,7 @@ fn main() {
         } else if remaining_time < 500 {
             current_beam_width = 300;
         } else {
-            current_beam_width = 800;
+            current_beam_width = 2500;
         }
 
         let mut next_beam = Vec::with_capacity(beam.len() * 4);
