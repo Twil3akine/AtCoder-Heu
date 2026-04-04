@@ -74,6 +74,18 @@ def main():
         action="store_true",
         help="保存されたベースラインとスコアを比較する",
     )
+    parser.add_argument(
+        "-q",
+        "--sequential",
+        action="store_true",
+        help="逐次実行（AtCoderに近い条件、時間が正確）",
+    )
+    parser.add_argument(
+        "-n",
+        type=int,
+        default=None,
+        help="実行するファイル数の上限（例: -n 20 で先頭20ケースのみ）",
+    )
     args = parser.parse_args()
 
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -95,6 +107,10 @@ def main():
 
     input_files = [f for f in os.listdir(IN_DIR) if f.endswith(".txt")]
     input_files.sort()
+    input_files = [f for f in os.listdir(IN_DIR) if f.endswith(".txt")]
+    input_files.sort()
+    if args.n is not None:
+        input_files = input_files[: args.n]
 
     baseline_scores = {}
     if args.compare:
@@ -114,8 +130,11 @@ def main():
     print(f"{'File':<10} | {'Score':<10} | {'Diff':<12} | N  | M  | C")
     print("-" * 60)
 
-    with ThreadPoolExecutor() as executor:
-        results = executor.map(process_case, input_files)
+    if args.sequential:
+        results = map(process_case, input_files)
+    else:
+        with ThreadPoolExecutor() as executor:
+            results = executor.map(process_case, input_files)
 
     for filename, score, n, m, c in results:
         results_dict[filename] = score
