@@ -4,9 +4,6 @@
 use std::io::{BufRead, stdin};
 use std::time::{Duration, Instant};
 
-// =============================================
-// Scanner & Macros
-// =============================================
 pub struct Scanner<R: std::io::BufRead> {
     pub reader: R,
     pub buf_str: Vec<u8>,
@@ -59,13 +56,10 @@ macro_rules! input {
     };
 }
 
-// =============================================
-// Main Logic
-// =============================================
-
-const TIME_LIMIT_MS: u64 = 1900;
+const TIME_LIMIT_MS: u64 = 1950;
+const BEAM_TIME_LIMIT_MS: u64 = 1500; // ビームサーチはここで打ち切り、残り200msをpost_processへ
 const SA_TIME_LIMIT_MS: u64 = 800;
-const DIJ: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)]; // U, D, L, R
+const DIJ: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
 const DIR_CHARS: [char; 4] = ['U', 'D', 'L', 'R'];
 
 struct XorShift(u32);
@@ -98,9 +92,6 @@ pub fn parse_input<R: BufRead>(sc: &mut Scanner<R>) -> Input {
     Input { N, M, C, d, f }
 }
 
-// ---------------------------------------------------------
-// Bitboard Utils
-// ---------------------------------------------------------
 #[inline(always)]
 fn set_bit(bits: &mut [u64; 4], pos: u8) {
     bits[(pos >> 6) as usize] |= 1 << (pos & 63);
@@ -114,9 +105,6 @@ fn get_bit(bits: &[u64; 4], pos: u8) -> bool {
     (bits[(pos >> 6) as usize] >> (pos & 63)) & 1 != 0
 }
 
-// ---------------------------------------------------------
-// 上位レイヤー：焼きなまし法
-// ---------------------------------------------------------
 fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
     let start = Instant::now();
     let mut rng = XorShift::new(42);
@@ -149,17 +137,12 @@ fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
             let dy = t[k].0 as i32 - t[k - 1].0 as i32;
             let dx = t[k].1 as i32 - t[k - 1].1 as i32;
             score += dy.abs() + dx.abs();
-
-            // 鋭角なターン（折り返し）に対するペナルティ
             if k >= 6 {
                 let p_dy = t[k - 1].0 as i32 - t[k - 2].0 as i32;
                 let p_dx = t[k - 1].1 as i32 - t[k - 2].1 as i32;
-
                 let dot = dy * p_dy + dx * p_dx;
-
-                // 内積が負（進行方向が逆転気味）ならペナルティを加算
                 if dot < 0 {
-                    score += 1; // 重みを減らして影響を抑える（あるいはこの3行を一旦コメントアウト）
+                    score += 1;
                 }
             }
         }
@@ -219,9 +202,6 @@ fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
         .collect()
 }
 
-// ---------------------------------------------------------
-// 下位レイヤー：ビームサーチ用状態管理 (ダイクストラ+A*評価)
-// ---------------------------------------------------------
 #[derive(Clone)]
 struct State {
     f: [u8; 256],
@@ -243,7 +223,6 @@ impl State {
                 f[i * 16 + j] = input.f[i][j] as u8;
             }
         }
-
         let mut ij = [0u8; 256];
         let mut body_bits = [0u64; 4];
         for i in 0..5 {
@@ -251,9 +230,7 @@ impl State {
             ij[i] = pos;
             set_bit(&mut body_bits, pos);
         }
-
         let c = [1u8; 256];
-
         let mut state = Self {
             f,
             ij,
@@ -295,10 +272,9 @@ impl State {
         let new_pos = (ni * 16 + nj) as u8;
         if self.len > 1 && new_pos == self.get_pos(1) {
             return false;
-        } // Uターン禁止
+        }
 
         let eaten_color = self.f[new_pos as usize];
-
         if eaten_color != 0 {
             self.f[new_pos as usize] = 0;
             self.head_ptr = self.head_ptr.wrapping_sub(1);
@@ -338,7 +314,6 @@ impl State {
         true
     }
 
-    // BinaryHeapを廃止し、固定長配列を用いた超高速BFS
     fn cost_to_target(&self, input: &Input, target: u8) -> i32 {
         if target == 255 {
             return 25000;
@@ -356,31 +331,21 @@ impl State {
         while head < tail {
             let u = q[head];
             head += 1;
-
             if u == target {
                 return dist[u as usize];
             }
-
             let d = dist[u as usize];
             let ui = (u / 16) as isize;
             let uj = (u % 16) as isize;
-
             for &(di, dj) in &DIJ {
                 let ni = ui + di;
                 let nj = uj + dj;
                 if ni >= 0 && ni < input.N as isize && nj >= 0 && nj < input.N as isize {
                     let v = (ni * 16 + nj) as u8;
-
-                    // 自分の体にはぶつかれない
                     if !get_bit(&self.body_bits, v) {
-                        let is_wrong_food = self.f[v as usize] != 0 && v != target;
-
-                        // 誤食ルートはヒューリスティック探索から除外（壁とみなす）
-                        // これによりコストが均一化され、重いDijkstraが不要になる
-                        if is_wrong_food {
+                        if self.f[v as usize] != 0 && v != target {
                             continue;
                         }
-
                         if dist[v as usize] > d + 10 {
                             dist[v as usize] = d + 10;
                             q[tail] = v;
@@ -390,11 +355,9 @@ impl State {
                 }
             }
         }
-
         25000
     }
 
-    // A*ヒューリスティックによる真の評価関数
     fn evaluate(&self, input: &Input, target_seq: &[u8], target_path_dist: &[i64]) -> i64 {
         let mut e = 0;
         for p in 0..self.len {
@@ -402,18 +365,12 @@ impl State {
                 e += 1;
             }
         }
-
-        // ゴール到達時は正確なスコアを返す
         if self.len == input.M {
             return self.turn as i64 + 10000 * e as i64;
         }
-
-        // 基本となる絶対スコア
         let base = self.turn as i64 + 10000 * (e as i64 + 2 * (input.M as i64 - self.len as i64));
-
         let expected_pos = target_seq[self.len];
         let target_color = input.d[self.len] as u8;
-
         let actual_target = if self.f[expected_pos as usize] == target_color {
             expected_pos
         } else {
@@ -435,25 +392,208 @@ impl State {
             }
             best_pos
         };
-
-        // ダイクストラで算出した実質コスト（障害物・誤食ペナルティ込み）
         let cost = self.cost_to_target(input, actual_target) as i64;
-
-        // AIが「色違いを食べると長さ不足ペナルティが減ってお得だ」と勘違いするのを防ぐため、
-        // 意図的にエラーに対して特大ペナルティ(15000)を乗せる
         let heuristic_error_penalty = 15000 * e as i64;
-
-        // SAで作った理想ルートの残り距離
         let future_cost = target_path_dist[self.len] * 10;
-
         base + heuristic_error_penalty + cost + future_cost
+    }
+
+    fn bfs_path_to(
+        &self,
+        input: &Input,
+        target: u8,
+        extra_walls: &[u64; 4],
+        ignore_foods: bool,
+    ) -> Option<Vec<usize>> {
+        if self.get_pos(0) == target {
+            return Some(vec![]);
+        }
+        let n = input.N as isize;
+        let mut dist = [u8::MAX; 256];
+        let mut prev_pos = [255u8; 256];
+        let mut prev_dir = [0u8; 256];
+        let mut q = [0u8; 512];
+        let mut head = 0usize;
+        let mut tail = 0usize;
+
+        let start = self.get_pos(0);
+        dist[start as usize] = 0;
+        q[tail] = start;
+        tail += 1;
+
+        while head < tail {
+            let u = q[head % 512];
+            head += 1;
+            if u == target {
+                let mut path = vec![];
+                let mut cur = u;
+                while cur != start {
+                    path.push(prev_dir[cur as usize] as usize);
+                    cur = prev_pos[cur as usize];
+                }
+                path.reverse();
+                return Some(path);
+            }
+            let ui = (u / 16) as isize;
+            let uj = (u % 16) as isize;
+            let d = dist[u as usize];
+            for dir in 0..4 {
+                let (di, dj) = DIJ[dir];
+                let ni = ui + di;
+                let nj = uj + dj;
+                if ni < 0 || ni >= n || nj < 0 || nj >= n {
+                    continue;
+                }
+                let v = (ni * 16 + nj) as u8;
+                if get_bit(extra_walls, v) {
+                    continue;
+                }
+                if ignore_foods && self.f[v as usize] != 0 && v != target {
+                    continue;
+                }
+                if dist[v as usize] == u8::MAX {
+                    dist[v as usize] = d + 1;
+                    prev_pos[v as usize] = u;
+                    prev_dir[v as usize] = dir as u8;
+                    q[tail % 512] = v;
+                    tail += 1;
+                }
+            }
+        }
+        None
+    }
+}
+
+fn try_fix_at(
+    state: &State,
+    p: usize,
+    input: &Input,
+    target_seq: &[u8],
+    target_path_dist: &[i64],
+    deadline: Instant,
+) -> Option<State> {
+    if p < 2 {
+        return None;
+    }
+
+    let bite_target = state.get_pos(p - 2);
+    let mut extra_walls = [0u64; 4];
+    for h in 0..p - 1 {
+        set_bit(&mut extra_walls, state.get_pos(h));
+    }
+
+    let path = state.bfs_path_to(input, bite_target, &extra_walls, true)?;
+    if path.len() > 100 {
+        return None;
+    }
+
+    let mut candidate = state.clone();
+    for &dir in &path {
+        candidate.apply(dir, input, target_seq, target_path_dist);
+    }
+    if candidate.len >= state.len {
+        return None;
+    }
+
+    while candidate.len < input.M {
+        if Instant::now() >= deadline {
+            break;
+        }
+        // target_seqが指定した位置の餌がまだ残っていればそこへ、
+        // なければ同色の最近傍へ（ただし色は必ず正しいものを）
+        let want_color = input.d[candidate.len] as u8;
+        let sa_pos = target_seq[candidate.len];
+        let best_food = if candidate.f[sa_pos as usize] == want_color {
+            sa_pos
+        } else {
+            let hi = (candidate.get_pos(0) / 16) as isize;
+            let hj = (candidate.get_pos(0) % 16) as isize;
+            let mut best = 255u8;
+            let mut best_dist = isize::MAX;
+            for i in 0..input.N {
+                for j in 0..input.N {
+                    let idx = i * 16 + j;
+                    if candidate.f[idx] == want_color {
+                        let d = (hi - i as isize).abs() + (hj - j as isize).abs();
+                        if d < best_dist {
+                            best_dist = d;
+                            best = idx as u8;
+                        }
+                    }
+                }
+            }
+            best
+        };
+        if best_food == 255 {
+            break;
+        }
+
+        let body_walls = candidate.body_bits.clone();
+        let Some(food_path) = candidate.bfs_path_to(input, best_food, &body_walls, true) else {
+            break;
+        };
+        if food_path.len() > 200 {
+            break;
+        }
+
+        for &dir in &food_path {
+            candidate.apply(dir, input, target_seq, target_path_dist);
+        }
+    }
+
+    Some(candidate)
+}
+
+fn post_process(
+    best_state: &mut State,
+    input: &Input,
+    target_seq: &[u8],
+    target_path_dist: &[i64],
+    deadline: Instant,
+) {
+    let mut improved = true;
+    while improved && Instant::now() < deadline {
+        improved = false;
+
+        let mismatches: Vec<usize> = (0..best_state.len)
+            .filter(|&p| input.d[p] != best_state.c[p] as usize)
+            .collect();
+
+        if mismatches.is_empty() {
+            break;
+        }
+
+        let mut best_candidate: Option<State> = None;
+
+        for &p in &mismatches {
+            if Instant::now() >= deadline {
+                break;
+            }
+            if let Some(candidate) =
+                try_fix_at(best_state, p, input, target_seq, target_path_dist, deadline)
+            {
+                if candidate.score < best_state.score {
+                    let is_better = match &best_candidate {
+                        None => true,
+                        Some(prev) => candidate.score < prev.score,
+                    };
+                    if is_better {
+                        best_candidate = Some(candidate);
+                    }
+                }
+            }
+        }
+
+        if let Some(c) = best_candidate {
+            *best_state = c;
+            improved = true;
+        }
     }
 }
 
 fn main() {
     let start_time = Instant::now();
     let sa_time_limit = Duration::from_millis(SA_TIME_LIMIT_MS);
-    // let total_time_limit = Duration::from_millis(TIME_LIMIT_MS);
 
     let mut sc = Scanner::new();
     let input = parse_input(&mut sc);
@@ -472,24 +612,18 @@ fn main() {
     let initial_state = State::new(&input, &target_seq, &target_path_dist);
     let mut beam = vec![initial_state];
     let mut best_state = beam[0].clone();
-
     let mut current_beam_width = 300;
-
-    // 【究極のFastSet】世代管理配列
-    // 0/1のboolではなく、何ターン目に訪れたかを記録する
     let mut seen_generation = vec![0u32; 65536];
     let mut current_generation = 0;
 
     while !beam.is_empty() {
         let elapsed_ms = start_time.elapsed().as_millis() as u64;
-        if elapsed_ms >= TIME_LIMIT_MS {
+        if elapsed_ms >= BEAM_TIME_LIMIT_MS {
             break;
-        }
+        } // ビームはここで打ち切り
 
-        // ターンが進むごとに世代を更新（fill(0)を使わずにリセットしたのと同じ効果）
         current_generation += 1;
-
-        let remaining_time = TIME_LIMIT_MS.saturating_sub(elapsed_ms);
+        let remaining_time = BEAM_TIME_LIMIT_MS.saturating_sub(elapsed_ms);
 
         if remaining_time < 200 {
             current_beam_width = 100;
@@ -508,7 +642,6 @@ fn main() {
                 }
                 continue;
             }
-
             for dir in 0..4 {
                 let mut next_state = state.clone();
                 if next_state.apply(dir, &input, &target_seq, &target_path_dist) {
@@ -525,15 +658,9 @@ fn main() {
         indices.sort_unstable_by_key(|&i| next_beam[i].score);
 
         let mut unique_states = Vec::with_capacity(current_beam_width);
-
         for &i in &indices {
             let state = &next_beam[i];
-
-            // 【超重要】キーには絶対に body_bits を入れない！
-            // 頭の位置と長さだけで同一視することで、多様性を確保する
             let key = (state.get_pos(0) as usize) << 8 | state.len;
-
-            // 今の世代（ターン）でまだ見ていないキーなら追加
             if seen_generation[key] != current_generation {
                 seen_generation[key] = current_generation;
                 unique_states.push(state.clone());
@@ -546,9 +673,18 @@ fn main() {
         if !unique_states.is_empty() && unique_states[0].score < best_state.score {
             best_state = unique_states[0].clone();
         }
-
         beam = unique_states;
     }
+
+    // 残り~200msをpost_processへ
+    let deadline = start_time + Duration::from_millis(TIME_LIMIT_MS);
+    post_process(
+        &mut best_state,
+        &input,
+        &target_seq,
+        &target_path_dist,
+        deadline,
+    );
 
     for &dir in &best_state.history {
         println!("{}", DIR_CHARS[dir as usize]);
