@@ -1,5 +1,8 @@
 #![allow(nonstandard_style)]
+#![allow(unused_assignments)]
 
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::io::{BufRead, stdin};
 use std::time::{Duration, Instant};
 
@@ -63,8 +66,7 @@ macro_rules! input {
 // =============================================
 
 const TIME_LIMIT_MS: u64 = 1900;
-const SA_TIME_LIMIT_MS: u64 = 100;
-const BEAM_WIDTH: usize = 1000;
+const SA_TIME_LIMIT_MS: u64 = 800;
 const DIJ: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)]; // U, D, L, R
 const DIR_CHARS: [char; 4] = ['U', 'D', 'L', 'R'];
 
@@ -105,19 +107,17 @@ pub fn parse_input<R: BufRead>(sc: &mut Scanner<R>) -> Input {
 fn set_bit(bits: &mut [u64; 4], pos: u8) {
     bits[(pos >> 6) as usize] |= 1 << (pos & 63);
 }
-
 #[inline(always)]
 fn clear_bit(bits: &mut [u64; 4], pos: u8) {
     bits[(pos >> 6) as usize] &= !(1 << (pos & 63));
 }
-
 #[inline(always)]
 fn get_bit(bits: &[u64; 4], pos: u8) -> bool {
     (bits[(pos >> 6) as usize] >> (pos & 63)) & 1 != 0
 }
 
 // ---------------------------------------------------------
-// 上位レイヤー：焼きなまし法 (変更なしのため一部省略形)
+// 上位レイヤー：焼きなまし法
 // ---------------------------------------------------------
 fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
     let start = Instant::now();
@@ -130,14 +130,21 @@ fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
             }
         }
     }
+
     let mut targets = vec![(0isize, 0isize); input.M];
+    targets[0] = (0, 0);
+    targets[1] = (1, 0);
+    targets[2] = (2, 0);
+    targets[3] = (3, 0);
     targets[4] = (4, 0);
+
     let mut usage = vec![0; input.C + 1];
     for k in 5..input.M {
         let c = input.d[k];
         targets[k] = foods[c][usage[c]];
         usage[c] += 1;
     }
+
     let calc_score = |t: &[(isize, isize)]| -> i32 {
         (5..input.M)
             .map(|k| {
@@ -146,6 +153,7 @@ fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
             })
             .sum()
     };
+
     let mut cur_score = calc_score(&targets);
     let mut best_targets = targets.clone();
     let mut best_score = cur_score;
@@ -200,15 +208,15 @@ fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------
-// 下位レイヤー：ビームサーチ用状態管理 (最適化版)
+// 下位レイヤー：ビームサーチ用状態管理 (ダイクストラ+A*評価)
 // ---------------------------------------------------------
 #[derive(Clone)]
 struct State {
     f: [u8; 256],
-    ij: [u8; 256], // リングバッファ化
+    ij: [u8; 256],
     c: [u8; 256],
-    body_bits: [u64; 4], // Bitboard導入
-    head_ptr: u8,        // リングバッファの先頭インデックス
+    body_bits: [u64; 4],
+    head_ptr: u8,
     len: usize,
     turn: usize,
     score: i64,
@@ -216,7 +224,7 @@ struct State {
 }
 
 impl State {
-    fn new(input: &Input, target_seq: &[u8]) -> Self {
+    fn new(input: &Input, target_seq: &[u8], target_path_dist: &[i64]) -> Self {
         let mut f = [0u8; 256];
         for i in 0..input.N {
             for j in 0..input.N {
@@ -245,17 +253,22 @@ impl State {
             score: 0,
             history: Vec::with_capacity(1024),
         };
-        state.score = state.evaluate(input, target_seq);
+        state.score = state.evaluate(input, target_seq, target_path_dist);
         state
     }
 
-    // リングバッファから特定のインデックスの座標を取得する O(1)
     #[inline(always)]
     fn get_pos(&self, idx: usize) -> u8 {
         self.ij[self.head_ptr.wrapping_add(idx as u8) as usize]
     }
 
-    fn apply(&mut self, dir: usize, input: &Input, target_seq: &[u8]) -> bool {
+    fn apply(
+        &mut self,
+        dir: usize,
+        input: &Input,
+        target_seq: &[u8],
+        target_path_dist: &[i64],
+    ) -> bool {
         let head_pos = self.get_pos(0);
         let hi = (head_pos / 16) as isize;
         let hj = (head_pos % 16) as isize;
@@ -275,7 +288,6 @@ impl State {
         let eaten_color = self.f[new_pos as usize];
 
         if eaten_color != 0 {
-            // 食事：長さが伸びるため尻尾はそのまま
             self.f[new_pos as usize] = 0;
             self.head_ptr = self.head_ptr.wrapping_sub(1);
             self.ij[self.head_ptr as usize] = new_pos;
@@ -283,7 +295,6 @@ impl State {
             self.len += 1;
             set_bit(&mut self.body_bits, new_pos);
         } else {
-            // 移動：尻尾が離れるのでBitboardから消す（噛みちぎり判定の前に消すのが味噌）
             let tail_pos = self.get_pos(self.len - 1);
             clear_bit(&mut self.body_bits, tail_pos);
             self.head_ptr = self.head_ptr.wrapping_sub(1);
@@ -291,7 +302,6 @@ impl State {
             set_bit(&mut self.body_bits, new_pos);
         }
 
-        // 噛みちぎりチェック (Bitboardにより衝突判定がO(1))
         if self.len >= 3 && get_bit(&self.body_bits, new_pos) {
             let mut bite_idx = 0;
             for h in 1..self.len - 1 {
@@ -304,7 +314,7 @@ impl State {
                 for p in bite_idx + 1..self.len {
                     let pos = self.get_pos(p);
                     self.f[pos as usize] = self.c[p];
-                    clear_bit(&mut self.body_bits, pos); // Bitboardからも削除
+                    clear_bit(&mut self.body_bits, pos);
                 }
                 self.len = bite_idx + 1;
             }
@@ -312,32 +322,28 @@ impl State {
 
         self.turn += 1;
         self.history.push(dir as u8);
-        self.score = self.evaluate(input, target_seq);
+        self.score = self.evaluate(input, target_seq, target_path_dist);
         true
     }
 
-    // Bitboardの恩恵で最軽量化されたBFS
-    fn bfs_to_target(&self, input: &Input, target: u8) -> i32 {
+    // BFSをダイクストラ法に進化させ、誤食のペナルティを計算に組み込む
+    fn cost_to_target(&self, input: &Input, target: u8) -> i32 {
         if target == 255 {
-            return 255;
+            return 25000;
         }
-        let mut dist = [255u8; 256];
-        let mut q = [0u8; 256];
-        let mut head = 0;
-        let mut tail = 0;
+        let mut dist = [25000i32; 256];
+        let mut heap = BinaryHeap::new();
 
         let start = self.get_pos(0);
         dist[start as usize] = 0;
-        q[tail] = start;
-        tail += 1;
+        heap.push(Reverse((0, start)));
 
-        while head < tail {
-            let u = q[head];
-            head += 1;
-            let d = dist[u as usize];
-
+        while let Some(Reverse((d, u))) = heap.pop() {
             if u == target {
-                return d as i32;
+                return d;
+            }
+            if d > dist[u as usize] {
+                continue;
             }
 
             let ui = (u / 16) as isize;
@@ -348,19 +354,27 @@ impl State {
                 let nj = uj + dj;
                 if ni >= 0 && ni < input.N as isize && nj >= 0 && nj < input.N as isize {
                     let v = (ni * 16 + nj) as u8;
-                    // 配列ではなくビット演算で障害物確認
-                    if dist[v as usize] == 255 && !get_bit(&self.body_bits, v) {
-                        dist[v as usize] = d + 1;
-                        q[tail] = v;
-                        tail += 1;
+                    // 自分の体にはぶつかれない
+                    if !get_bit(&self.body_bits, v) {
+                        let is_wrong_food = self.f[v as usize] != 0 && v != target;
+
+                        // 空き地はコスト10、間違った餌を踏むのはコスト15000
+                        let cost = if is_wrong_food { 15000 } else { 10 };
+                        let next_d = d + cost;
+
+                        if next_d < dist[v as usize] {
+                            dist[v as usize] = next_d;
+                            heap.push(Reverse((next_d, v)));
+                        }
                     }
                 }
             }
         }
-        255
+        25000 // 道が完全に塞がれている場合
     }
 
-    fn evaluate(&self, input: &Input, target_seq: &[u8]) -> i64 {
+    // A*ヒューリスティックによる真の評価関数
+    fn evaluate(&self, input: &Input, target_seq: &[u8], target_path_dist: &[i64]) -> i64 {
         let mut e = 0;
         for p in 0..self.len {
             if input.d[p] != self.c[p] as usize {
@@ -368,70 +382,99 @@ impl State {
             }
         }
 
+        // ゴール到達時は正確なスコアを返す
+        if self.len == input.M {
+            return self.turn as i64 + 10000 * e as i64;
+        }
+
+        // 基本となる絶対スコア
         let base = self.turn as i64 + 10000 * (e as i64 + 2 * (input.M as i64 - self.len as i64));
 
-        let mut dist_penalty = 0;
-        if self.len < input.M {
-            let expected_pos = target_seq[self.len];
-            let target_color = input.d[self.len] as u8;
+        let expected_pos = target_seq[self.len];
+        let target_color = input.d[self.len] as u8;
 
-            let actual_target = if self.f[expected_pos as usize] == target_color {
-                expected_pos
-            } else {
-                let mut best_pos = 255;
-                let mut min_d = 1000;
-                let hi = (self.get_pos(0) / 16) as isize;
-                let hj = (self.get_pos(0) % 16) as isize;
-                for i in 0..input.N {
-                    for j in 0..input.N {
-                        let idx = i * 16 + j;
-                        if self.f[idx] == target_color {
-                            let d = (hi - i as isize).abs() + (hj - j as isize).abs();
-                            if d < min_d {
-                                min_d = d;
-                                best_pos = idx as u8;
-                            }
+        let actual_target = if self.f[expected_pos as usize] == target_color {
+            expected_pos
+        } else {
+            let mut best_pos = 255;
+            let mut min_d = 1000;
+            let hi = (self.get_pos(0) / 16) as isize;
+            let hj = (self.get_pos(0) % 16) as isize;
+            for i in 0..input.N {
+                for j in 0..input.N {
+                    let idx = i * 16 + j;
+                    if self.f[idx] == target_color {
+                        let d = (hi - i as isize).abs() + (hj - j as isize).abs();
+                        if d < min_d {
+                            min_d = d;
+                            best_pos = idx as u8;
                         }
                     }
                 }
-                best_pos
-            };
+            }
+            best_pos
+        };
 
-            let bfs_dist = self.bfs_to_target(input, actual_target);
-            dist_penalty = if bfs_dist == 255 {
-                10000
-            } else {
-                bfs_dist as i64 * 10
-            };
-        }
-        base + dist_penalty
+        // ダイクストラで算出した実質コスト（障害物・誤食ペナルティ込み）
+        let cost = self.cost_to_target(input, actual_target) as i64;
+
+        // AIが「色違いを食べると長さ不足ペナルティが減ってお得だ」と勘違いするのを防ぐため、
+        // 意図的にエラーに対して特大ペナルティ(15000)を乗せる
+        let heuristic_error_penalty = 15000 * e as i64;
+
+        // SAで作った理想ルートの残り距離
+        let future_cost = target_path_dist[self.len] * 10;
+
+        base + heuristic_error_penalty + cost + future_cost
     }
 }
 
 fn main() {
     let start_time = Instant::now();
     let sa_time_limit = Duration::from_millis(SA_TIME_LIMIT_MS);
-    let total_time_limit = Duration::from_millis(TIME_LIMIT_MS);
 
     let mut sc = Scanner::new();
     let input = parse_input(&mut sc);
 
     let target_seq = optimize_targets(&input, sa_time_limit);
 
-    let initial_state = State::new(&input, &target_seq);
+    // 【A*用】残りの餌をすべて食べるための「未来の必要ターン数(距離)」を事前計算
+    let mut target_path_dist = vec![0i64; input.M + 1];
+    for len in (0..input.M - 1).rev() {
+        let p1 = target_seq[len];
+        let p2 = target_seq[len + 1];
+        let d = ((p1 / 16) as i64 - (p2 / 16) as i64).abs()
+            + ((p1 % 16) as i64 - (p2 % 16) as i64).abs();
+        target_path_dist[len] = target_path_dist[len + 1] + d;
+    }
+
+    let initial_state = State::new(&input, &target_seq, &target_path_dist);
     let mut beam = vec![initial_state];
     let mut best_state = beam[0].clone();
     let mut seen = vec![false; 65536];
 
+    let mut current_beam_width = 300;
+
     while !beam.is_empty() {
-        if start_time.elapsed() >= total_time_limit {
+        let elapsed_ms = start_time.elapsed().as_millis() as u64;
+        if elapsed_ms >= TIME_LIMIT_MS {
             break;
+        }
+
+        let remaining_time = TIME_LIMIT_MS.saturating_sub(elapsed_ms);
+
+        if remaining_time < 200 {
+            current_beam_width = 100;
+        } else if remaining_time < 500 {
+            current_beam_width = 300;
+        } else {
+            current_beam_width = 800; // ダイクストラ版でも安定して回る幅に調整
         }
 
         let mut next_beam = Vec::with_capacity(beam.len() * 4);
 
         for state in &beam {
-            if state.len == input.M && state.evaluate(&input, &target_seq) == state.turn as i64 {
+            if state.len == input.M && state.score == state.turn as i64 {
                 if state.score < best_state.score {
                     best_state = state.clone();
                 }
@@ -440,7 +483,7 @@ fn main() {
 
             for dir in 0..4 {
                 let mut next_state = state.clone();
-                if next_state.apply(dir, &input, &target_seq) {
+                if next_state.apply(dir, &input, &target_seq, &target_path_dist) {
                     next_beam.push(next_state);
                 }
             }
@@ -450,11 +493,10 @@ fn main() {
             break;
         }
 
-        // [最適化4] 構造体そのものではなく「インデックス」だけをソートしてメモリ帯域を節約
         let mut indices: Vec<usize> = (0..next_beam.len()).collect();
         indices.sort_unstable_by_key(|&i| next_beam[i].score);
 
-        let mut unique_states = Vec::with_capacity(BEAM_WIDTH);
+        let mut unique_states = Vec::with_capacity(current_beam_width);
         seen.fill(false);
 
         for &i in &indices {
@@ -463,7 +505,7 @@ fn main() {
             if !seen[key] {
                 seen[key] = true;
                 unique_states.push(state.clone());
-                if unique_states.len() == BEAM_WIDTH {
+                if unique_states.len() == current_beam_width {
                     break;
                 }
             }
