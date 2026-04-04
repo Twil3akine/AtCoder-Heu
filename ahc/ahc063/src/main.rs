@@ -1,8 +1,6 @@
 #![allow(nonstandard_style)]
 #![allow(unused_assignments)]
 
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
 use std::io::{BufRead, stdin};
 use std::time::{Duration, Instant};
 
@@ -146,12 +144,26 @@ fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
     }
 
     let calc_score = |t: &[(isize, isize)]| -> i32 {
-        (5..input.M)
-            .map(|k| {
-                (t[k].0 as i32 - t[k - 1].0 as i32).abs()
-                    + (t[k].1 as i32 - t[k - 1].1 as i32).abs()
-            })
-            .sum()
+        let mut score = 0;
+        for k in 5..input.M {
+            let dy = t[k].0 as i32 - t[k - 1].0 as i32;
+            let dx = t[k].1 as i32 - t[k - 1].1 as i32;
+            score += dy.abs() + dx.abs();
+
+            // 鋭角なターン（折り返し）に対するペナルティ
+            if k >= 6 {
+                let p_dy = t[k - 1].0 as i32 - t[k - 2].0 as i32;
+                let p_dx = t[k - 1].1 as i32 - t[k - 2].1 as i32;
+
+                let dot = dy * p_dy + dx * p_dx;
+
+                // 内積が負（進行方向が逆転気味）ならペナルティを加算
+                if dot < 0 {
+                    score += 1; // 重みを減らして影響を抑える（あるいはこの3行を一旦コメントアウト）
+                }
+            }
+        }
+        score
     };
 
     let mut cur_score = calc_score(&targets);
@@ -326,26 +338,30 @@ impl State {
         true
     }
 
-    // BFSをダイクストラ法に進化させ、誤食のペナルティを計算に組み込む
+    // BinaryHeapを廃止し、固定長配列を用いた超高速BFS
     fn cost_to_target(&self, input: &Input, target: u8) -> i32 {
         if target == 255 {
             return 25000;
         }
         let mut dist = [25000i32; 256];
-        let mut heap = BinaryHeap::new();
+        let mut q = [0u8; 256];
+        let mut head = 0;
+        let mut tail = 0;
 
         let start = self.get_pos(0);
         dist[start as usize] = 0;
-        heap.push(Reverse((0, start)));
+        q[tail] = start;
+        tail += 1;
 
-        while let Some(Reverse((d, u))) = heap.pop() {
+        while head < tail {
+            let u = q[head];
+            head += 1;
+
             if u == target {
-                return d;
-            }
-            if d > dist[u as usize] {
-                continue;
+                return dist[u as usize];
             }
 
+            let d = dist[u as usize];
             let ui = (u / 16) as isize;
             let uj = (u % 16) as isize;
 
@@ -354,23 +370,28 @@ impl State {
                 let nj = uj + dj;
                 if ni >= 0 && ni < input.N as isize && nj >= 0 && nj < input.N as isize {
                     let v = (ni * 16 + nj) as u8;
+
                     // 自分の体にはぶつかれない
                     if !get_bit(&self.body_bits, v) {
                         let is_wrong_food = self.f[v as usize] != 0 && v != target;
 
-                        // 空き地はコスト10、間違った餌を踏むのはコスト15000
-                        let cost = if is_wrong_food { 15000 } else { 10 };
-                        let next_d = d + cost;
+                        // 誤食ルートはヒューリスティック探索から除外（壁とみなす）
+                        // これによりコストが均一化され、重いDijkstraが不要になる
+                        if is_wrong_food {
+                            continue;
+                        }
 
-                        if next_d < dist[v as usize] {
-                            dist[v as usize] = next_d;
-                            heap.push(Reverse((next_d, v)));
+                        if dist[v as usize] > d + 10 {
+                            dist[v as usize] = d + 10;
+                            q[tail] = v;
+                            tail += 1;
                         }
                     }
                 }
             }
         }
-        25000 // 道が完全に塞がれている場合
+
+        25000
     }
 
     // A*ヒューリスティックによる真の評価関数
@@ -432,13 +453,13 @@ impl State {
 fn main() {
     let start_time = Instant::now();
     let sa_time_limit = Duration::from_millis(SA_TIME_LIMIT_MS);
+    // let total_time_limit = Duration::from_millis(TIME_LIMIT_MS);
 
     let mut sc = Scanner::new();
     let input = parse_input(&mut sc);
 
     let target_seq = optimize_targets(&input, sa_time_limit);
 
-    // 【A*用】残りの餌をすべて食べるための「未来の必要ターン数(距離)」を事前計算
     let mut target_path_dist = vec![0i64; input.M + 1];
     for len in (0..input.M - 1).rev() {
         let p1 = target_seq[len];
@@ -451,15 +472,22 @@ fn main() {
     let initial_state = State::new(&input, &target_seq, &target_path_dist);
     let mut beam = vec![initial_state];
     let mut best_state = beam[0].clone();
-    let mut seen = vec![false; 65536];
 
     let mut current_beam_width = 300;
+
+    // 【究極のFastSet】世代管理配列
+    // 0/1のboolではなく、何ターン目に訪れたかを記録する
+    let mut seen_generation = vec![0u32; 65536];
+    let mut current_generation = 0;
 
     while !beam.is_empty() {
         let elapsed_ms = start_time.elapsed().as_millis() as u64;
         if elapsed_ms >= TIME_LIMIT_MS {
             break;
         }
+
+        // ターンが進むごとに世代を更新（fill(0)を使わずにリセットしたのと同じ効果）
+        current_generation += 1;
 
         let remaining_time = TIME_LIMIT_MS.saturating_sub(elapsed_ms);
 
@@ -468,7 +496,7 @@ fn main() {
         } else if remaining_time < 500 {
             current_beam_width = 300;
         } else {
-            current_beam_width = 800; // ダイクストラ版でも安定して回る幅に調整
+            current_beam_width = 800;
         }
 
         let mut next_beam = Vec::with_capacity(beam.len() * 4);
@@ -497,13 +525,17 @@ fn main() {
         indices.sort_unstable_by_key(|&i| next_beam[i].score);
 
         let mut unique_states = Vec::with_capacity(current_beam_width);
-        seen.fill(false);
 
         for &i in &indices {
             let state = &next_beam[i];
+
+            // 【超重要】キーには絶対に body_bits を入れない！
+            // 頭の位置と長さだけで同一視することで、多様性を確保する
             let key = (state.get_pos(0) as usize) << 8 | state.len;
-            if !seen[key] {
-                seen[key] = true;
+
+            // 今の世代（ターン）でまだ見ていないキーなら追加
+            if seen_generation[key] != current_generation {
+                seen_generation[key] = current_generation;
                 unique_states.push(state.clone());
                 if unique_states.len() == current_beam_width {
                     break;
@@ -511,7 +543,7 @@ fn main() {
             }
         }
 
-        if unique_states[0].score < best_state.score {
+        if !unique_states.is_empty() && unique_states[0].score < best_state.score {
             best_state = unique_states[0].clone();
         }
 
