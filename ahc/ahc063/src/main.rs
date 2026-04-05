@@ -63,7 +63,7 @@ macro_rules! input {
 // Main Logic
 // =============================================
 
-const TIME_LIMIT_MS: u64 = 1950;
+const TIME_LIMIT_MS: u64 = 1990;
 const SA_TIME_LIMIT_MS: u64 = 200;
 const DIJ: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)]; // U, D, L, R
 const DIR_CHARS: [char; 4] = ['U', 'D', 'L', 'R'];
