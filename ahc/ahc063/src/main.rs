@@ -441,7 +441,7 @@ impl State {
 
         // AIが「色違いを食べると長さ不足ペナルティが減ってお得だ」と勘違いするのを防ぐため、
         // 意図的にエラーに対して特大ペナルティ(15000)を乗せる
-        let heuristic_error_penalty = 15000 * e as i64;
+        let heuristic_error_penalty = 27500 * e as i64;
 
         // SAで作った理想ルートの残り距離
         let future_cost = target_path_dist[self.len] * 10;
@@ -491,7 +491,11 @@ fn main() {
 
         let remaining_time = TIME_LIMIT_MS.saturating_sub(elapsed_ms);
 
-        if remaining_time < 200 {
+        if remaining_time < 50 {
+            current_beam_width = 10;
+        } else if remaining_time < 100 {
+            current_beam_width = 50;
+        } else if remaining_time < 200 {
             current_beam_width = 100;
         } else if remaining_time < 500 {
             current_beam_width = 300;
