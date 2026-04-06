@@ -64,7 +64,7 @@ macro_rules! input {
 // =============================================
 
 const TIME_LIMIT_MS: u64 = 1990;
-const SA_TIME_LIMIT_MS: u64 = 200;
+const SA_TIME_LIMIT_MS: u64 = 300;
 const DIJ: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)]; // U, D, L, R
 const DIR_CHARS: [char; 4] = ['U', 'D', 'L', 'R'];
 
@@ -179,7 +179,7 @@ fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
         .collect();
 
     if !valid.is_empty() {
-        let (t0, t1) = (10.0, 0.1);
+        let (t0, t1) = (15.0, 0.1);
         let mut iter = 0;
         loop {
             if iter & 127 == 0 && start.elapsed() >= time_limit {
@@ -462,7 +462,6 @@ impl State {
 fn main() {
     let start_time = Instant::now();
     let sa_time_limit = Duration::from_millis(SA_TIME_LIMIT_MS);
-    // let total_time_limit = Duration::from_millis(TIME_LIMIT_MS);
 
     let mut sc = Scanner::new();
     let input = parse_input(&mut sc);
