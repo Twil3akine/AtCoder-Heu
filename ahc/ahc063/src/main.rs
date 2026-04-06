@@ -499,19 +499,19 @@ fn main() {
 
         let remaining_time = TIME_LIMIT_MS.saturating_sub(elapsed_ms);
 
-        if remaining_time < 50 {
-            current_beam_width = 30;
+        current_beam_width = if remaining_time < 50 {
+            30
         } else if remaining_time < 100 {
-            current_beam_width = 100;
+            100
         } else if remaining_time < 200 {
-            current_beam_width = 200;
+            200
         } else if remaining_time < 500 {
-            current_beam_width = 500;
+            500
         } else if remaining_time < 1000 {
-            current_beam_width = 2000;
+            2000
         } else {
-            current_beam_width = 4000;
-        }
+            4000
+        };
 
         let mut next_beam = Vec::with_capacity(beam.len() * 4);
 
