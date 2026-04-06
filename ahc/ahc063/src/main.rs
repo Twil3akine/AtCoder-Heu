@@ -232,6 +232,7 @@ struct State {
     len: usize,
     turn: usize,
     score: i64,
+    error_count: usize,
     history: Vec<u8>,
 }
 
@@ -263,6 +264,7 @@ impl State {
             len: 5,
             turn: 0,
             score: 0,
+            error_count: 0,
             history: Vec::with_capacity(1024),
         };
         state.score = state.evaluate(input, target_seq, target_path_dist);
@@ -304,6 +306,12 @@ impl State {
             self.head_ptr = self.head_ptr.wrapping_sub(1);
             self.ij[self.head_ptr as usize] = new_pos;
             self.c[self.len] = eaten_color;
+
+            // 食べた色がターゲットと異なる場合はエラーを加算
+            if input.d[self.len] != eaten_color as usize {
+                self.error_count += 1;
+            }
+
             self.len += 1;
             set_bit(&mut self.body_bits, new_pos);
         } else {
@@ -327,7 +335,13 @@ impl State {
                     let pos = self.get_pos(p);
                     self.f[pos as usize] = self.c[p];
                     clear_bit(&mut self.body_bits, pos);
+
+                    // ちぎり落とした部分にエラーが含まれていた場合は減算
+                    if input.d[p] != self.c[p] as usize {
+                        self.error_count -= 1;
+                    }
                 }
+
                 self.len = bite_idx + 1;
             }
         }
@@ -396,12 +410,7 @@ impl State {
 
     // A*ヒューリスティックによる真の評価関数
     fn evaluate(&self, input: &Input, target_seq: &[u8], target_path_dist: &[i64]) -> i64 {
-        let mut e = 0;
-        for p in 0..self.len {
-            if input.d[p] != self.c[p] as usize {
-                e += 1;
-            }
-        }
+        let e = self.error_count + 1;
 
         // ゴール到達時は正確なスコアを返す
         if self.len == input.M {
