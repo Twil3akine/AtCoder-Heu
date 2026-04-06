@@ -1,0 +1,497 @@
+<html>
+    <head>
+        <title>Visualizer</title>
+        <meta content="text/html; charset=UTF-8" http-equiv="Content-Type" />
+        <script src="vis_files/jquery-1.9.1.min.js"></script>
+        <style>
+            body {
+                font-family: sans-serif;
+                margin: 15px;
+            }
+            .dashboard {
+                display: flex;
+                gap: 30px;
+                align-items: flex-start;
+            }
+            .left-panel {
+                width: 620px;
+                flex-shrink: 0;
+            }
+            .right-panel {
+                flex-grow: 1;
+            }
+            .control-box {
+                background: #eef2f5;
+                padding: 15px;
+                border-radius: 5px;
+                margin-bottom: 15px;
+            }
+            textarea {
+                width: 100%;
+                box-sizing: border-box;
+                font-family: monospace;
+            }
+            #score {
+                font-size: 24px;
+                font-weight: bold;
+                margin-top: 0;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div class="dashboard">
+            <div class="left-panel">
+                <div class="control-box">
+                    <b>📁 ローカルファイル一括読み込み</b>
+                    <span
+                        id="loadStatus"
+                        style="
+                            font-size: 13px;
+                            color: #e74c3c;
+                            margin-left: 10px;
+                            font-weight: bold;
+                        "
+                        >(未読み込み)</span
+                    ><br />
+
+                    <div style="margin-top: 10px; display: grid; gap: 5px">
+                        <label
+                            >Input(in) フォルダ:
+                            <input
+                                type="file"
+                                id="inDirSelect"
+                                webkitdirectory=""
+                        /></label>
+                        <label
+                            >Output(out) フォルダ:
+                            <input
+                                type="file"
+                                id="outDirSelect"
+                                webkitdirectory=""
+                        /></label>
+                    </div>
+
+                    <div
+                        style="
+                            margin-top: 15px;
+                            display: flex;
+                            align-items: center;
+                            gap: 10px;
+                        "
+                    >
+                        <label>
+                            テストケース:
+                            <select
+                                id="fileSelect"
+                                disabled="disabled"
+                                style="
+                                    font-size: 16px;
+                                    padding: 4px;
+                                    min-width: 120px;
+                                "
+                            ></select>
+                        </label>
+                        <button
+                            id="prevBtn"
+                            disabled
+                            style="padding: 4px 12px; cursor: pointer"
+                        >
+                            ◀ 前 (h)
+                        </button>
+                        <button
+                            id="nextBtn"
+                            disabled
+                            style="padding: 4px 12px; cursor: pointer"
+                        >
+                            次 ▶ (l)
+                        </button>
+                    </div>
+                </div>
+
+                <p>
+                    <label>
+                        Input:<br />
+                        <textarea
+                            id="input"
+                            rows="5"
+                            data-gramm_editor="false"
+                            oninput="updateOutput()"
+                        ></textarea>
+                    </label>
+                </p>
+                <p>
+                    <label>
+                        Output:
+                        <input
+                            type="checkbox"
+                            id="manual"
+                            onchange="visualize()"
+                        />manual mode (↑↓←→⌫ Keys)<br />
+                        <textarea
+                            id="output"
+                            rows="5"
+                            data-gramm_editor="false"
+                            oninput="updateOutput()"
+                        ></textarea>
+                    </label>
+                </p>
+
+                <p>
+                    <label
+                        ><input
+                            type="checkbox"
+                            id="show_number"
+                            onchange="visualize()"
+                            checked="checked"
+                        />show number</label
+                    >
+                </p>
+
+                <div
+                    style="
+                        background: #f8f9fa;
+                        padding: 10px;
+                        border-radius: 5px;
+                    "
+                >
+                    <div
+                        style="
+                            display: flex;
+                            align-items: center;
+                            gap: 15px;
+                            margin-bottom: 10px;
+                        "
+                    >
+                        <input
+                            type="button"
+                            id="play"
+                            value="▶"
+                            style="width: 32px; height: 32px; cursor: pointer"
+                        />
+                        <label
+                            style="display: flex; align-items: center; gap: 5px"
+                        >
+                            slow
+                            <input
+                                type="range"
+                                id="speed"
+                                min="1"
+                                max="60"
+                                value="39"
+                                style="width: 150px"
+                            />
+                            fast
+                        </label>
+                        <label>
+                            turn:
+                            <input
+                                type="number"
+                                id="turn"
+                                value="0"
+                                min="0"
+                                max="1301"
+                                style="width: 70px; text-align: right"
+                                onchange="update_t_throttled(this.value)"
+                            />
+                        </label>
+                    </div>
+                    <input
+                        type="range"
+                        id="t_bar"
+                        min="0"
+                        max="1301"
+                        value="0"
+                        style="width: 100%"
+                        oninput="update_t_throttled(this.value)"
+                    />
+                </div>
+            </div>
+
+            <div class="right-panel">
+                <p id="score">Score = 0</p>
+                <div id="result" style="user-select: none"><p>Invalid</p></div>
+            </div>
+        </div>
+
+        <script type="module">
+            import init, {
+                vis,
+                get_max_turn,
+                VisOption,
+                manual_update,
+                undo,
+            } from "./EbfTtMTp.js";
+
+            function getVisOption() {
+                return new VisOption(
+                    document.getElementById("show_number").checked,
+                );
+            }
+
+            async function run() {
+                await init();
+            }
+            run();
+
+            function visualize() {
+                const input = document.getElementById("input").value;
+                const output = document.getElementById("output").value;
+                const t = document.getElementById("turn").value;
+                const option = getVisOption();
+                if (!input || !output) return;
+                try {
+                    const ret = vis(input, output, t, option);
+                    document.getElementById("score").innerHTML =
+                        "Score = " +
+                        ret.score +
+                        (ret.error
+                            ? " <font color='red'>(" + ret.error + ")</font>"
+                            : "");
+                    document.getElementById("result").innerHTML = ret.svg;
+                } catch (error) {
+                    document.getElementById("result").innerHTML =
+                        "<p>Invalid</p>";
+                }
+            }
+            window.visualize = visualize;
+
+            function update_t(t) {
+                const max_turn = Number(document.getElementById("turn").max);
+                const new_turn = Math.min(Math.max(0, t), max_turn);
+                document.getElementById("turn").value = new_turn;
+                document.getElementById("t_bar").value = new_turn;
+                visualize();
+            }
+            window.update_t = update_t;
+
+            let pendingValue = null;
+            let rafId = null;
+            function update_t_throttled(t) {
+                pendingValue = t;
+                if (rafId !== null) return;
+                rafId = requestAnimationFrame(() => {
+                    rafId = null;
+                    if (pendingValue !== null) {
+                        update_t(pendingValue);
+                        pendingValue = null;
+                    }
+                });
+            }
+            window.update_t_throttled = update_t_throttled;
+
+            var prev = Date.now();
+            const play = document.getElementById("play");
+            const speed = document.getElementById("speed");
+
+            function start_autoplay() {
+                if (
+                    Number(document.getElementById("turn").value) >=
+                    Number(document.getElementById("turn").max)
+                ) {
+                    document.getElementById("turn").value = 0;
+                }
+                prev = Date.now();
+                play.value = "■";
+                update_t(document.getElementById("turn").value);
+            }
+            window.start_autoplay = start_autoplay;
+
+            function updateOutput() {
+                play.value = "▶";
+                const input = document.getElementById("input").value;
+                const output = document.getElementById("output").value;
+                if (!input || !output) return;
+                try {
+                    const t = get_max_turn(input, output);
+                    document.getElementById("turn").max = t;
+                    document.getElementById("t_bar").max = t;
+                    update_t(t);
+                } catch (error) {
+                    document.getElementById("result").innerHTML =
+                        "<p>Invalid</p>";
+                }
+            }
+            window.updateOutput = updateOutput;
+
+            // ▼ キーボードショートカットの拡張 (h/l および manual mode) ▼
+            document.body.addEventListener("keydown", (event) => {
+                // テキストエリア等の入力中であれば何もしない（誤爆防止）
+                if (
+                    ["TEXTAREA", "INPUT", "SELECT"].includes(
+                        event.target.tagName,
+                    )
+                )
+                    return;
+
+                // h / l キーでのケース切り替え
+                if (
+                    event.key === "h" &&
+                    !document.getElementById("prevBtn").disabled
+                ) {
+                    document.getElementById("prevBtn").click();
+                    return;
+                }
+                if (
+                    event.key === "l" &&
+                    !document.getElementById("nextBtn").disabled
+                ) {
+                    document.getElementById("nextBtn").click();
+                    return;
+                }
+
+                // マニュアル操作モード
+                const input = document.getElementById("input").value;
+                const output = document.getElementById("output").value;
+                const t = document.getElementById("turn").value;
+                if (document.getElementById("manual").checked) {
+                    if (
+                        [
+                            "ArrowUp",
+                            "ArrowDown",
+                            "ArrowLeft",
+                            "ArrowRight",
+                            "Backspace",
+                        ].includes(event.key)
+                    ) {
+                        const dir =
+                            event.key === "ArrowUp"
+                                ? "U"
+                                : event.key === "ArrowDown"
+                                  ? "D"
+                                  : event.key === "ArrowLeft"
+                                    ? "L"
+                                    : event.key === "ArrowRight"
+                                      ? "R"
+                                      : null;
+                        document.getElementById("output").value = dir
+                            ? manual_update(input, output, t, dir)
+                            : undo(input, output, t);
+                        updateOutput();
+                        event.preventDefault();
+                    }
+                }
+            });
+
+            play.onclick = (event) => {
+                play.value == "■" ? (play.value = "▶") : start_autoplay();
+            };
+
+            (function () {
+                const turnEl = document.getElementById("turn");
+                const speedEl = document.getElementById("speed");
+                let lastTs = null;
+                let acc = 0;
+                function autoplay(ts) {
+                    if (lastTs === null) lastTs = ts;
+                    if (play.value == "■") {
+                        const dt = ts - lastTs;
+                        const baseInterval = 2000;
+                        const speedValue = Math.pow(1.1, speedEl.value);
+                        acc += dt * (speedValue / baseInterval);
+                        if (acc >= 1) {
+                            const t = Number(turnEl.value);
+                            const maxTurn = Number(turnEl.max);
+                            const step = Math.floor(acc);
+                            const newT = Math.min(maxTurn, t + step);
+                            if (newT !== t) update_t(newT);
+                            if (newT >= maxTurn) {
+                                play.value = "▶";
+                                acc = 0;
+                            } else acc -= step;
+                        }
+                    }
+                    lastTs = ts;
+                    requestAnimationFrame(autoplay);
+                }
+                requestAnimationFrame(autoplay);
+            })();
+
+            let inFiles = [];
+            let outFiles = [];
+
+            document.getElementById("inDirSelect").onchange = (event) => {
+                inFiles = Array.from(event.target.files).filter((f) =>
+                    f.name.endsWith(".txt"),
+                );
+                updateFileList();
+            };
+            document.getElementById("outDirSelect").onchange = (event) => {
+                outFiles = Array.from(event.target.files).filter((f) =>
+                    f.name.endsWith(".txt"),
+                );
+                updateFileList();
+            };
+
+            const select = document.getElementById("fileSelect");
+            const prevBtn = document.getElementById("prevBtn");
+            const nextBtn = document.getElementById("nextBtn");
+            const loadStatus = document.getElementById("loadStatus");
+
+            function updateFileList() {
+                select.innerHTML = "";
+                const fileNames = new Set();
+                inFiles.forEach((f) => fileNames.add(f.name));
+                outFiles.forEach((f) => fileNames.add(f.name));
+
+                const sortedNames = Array.from(fileNames).sort((a, b) =>
+                    a.localeCompare(b),
+                );
+
+                if (inFiles.length > 0 || outFiles.length > 0) {
+                    loadStatus.textContent = `(読込完了: in ${inFiles.length}件 / out ${outFiles.length}件)`;
+                    loadStatus.style.color = "#27ae60";
+                }
+
+                if (sortedNames.length > 0) {
+                    for (let name of sortedNames) {
+                        const option = document.createElement("option");
+                        option.value = name;
+                        option.textContent = name;
+                        select.appendChild(option);
+                    }
+                    select.disabled = false;
+                    prevBtn.disabled = false;
+                    nextBtn.disabled = false;
+                    select.dispatchEvent(new Event("change"));
+                } else {
+                    select.disabled = true;
+                    prevBtn.disabled = true;
+                    nextBtn.disabled = true;
+                }
+            }
+
+            select.onchange = async (event) => {
+                const name = event.target.value;
+                const outFile = outFiles.find((file) => file.name === name);
+                const inFile = inFiles.find((file) => file.name === name);
+
+                document.getElementById("output").value = "";
+                document.getElementById("input").value = "";
+
+                if (outFile)
+                    document.getElementById("output").value =
+                        await outFile.text();
+                if (inFile)
+                    document.getElementById("input").value =
+                        await inFile.text();
+
+                updateOutput();
+            };
+
+            prevBtn.onclick = () => {
+                if (select.selectedIndex > 0) {
+                    select.selectedIndex--;
+                    select.dispatchEvent(new Event("change"));
+                }
+            };
+
+            nextBtn.onclick = () => {
+                if (select.selectedIndex < select.options.length - 1) {
+                    select.selectedIndex++;
+                    select.dispatchEvent(new Event("change"));
+                }
+            };
+        </script>
+    </body>
+</html>
