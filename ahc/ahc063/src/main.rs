@@ -305,7 +305,6 @@ struct State {
 impl State {
     fn new(
         input: &Input,
-        target_seq: &[u8],
         target_path_dist: &[i64],
         tree: &mut MoveTree,
         bfs_ctx: &mut BfsContext,
@@ -340,7 +339,7 @@ impl State {
             error_count: 0,
             tree_node_id: root_id,
         };
-        state.score = state.evaluate(input, target_seq, target_path_dist, bfs_ctx, false);
+        state.score = state.evaluate(input, target_path_dist, bfs_ctx, false);
         state
     }
 
@@ -353,7 +352,6 @@ impl State {
         &mut self,
         dir: usize,
         input: &Input,
-        target_seq: &[u8],
         target_path_dist: &[i64],
         new_tree_id: u32,
         bfs_ctx: &mut BfsContext,
@@ -418,15 +416,11 @@ impl State {
 
         self.turn += 1;
         self.tree_node_id = new_tree_id;
-        self.score = self.evaluate(input, target_seq, target_path_dist, bfs_ctx, panic_mode);
+        self.score = self.evaluate(input, target_path_dist, bfs_ctx, panic_mode);
         true
     }
 
-    fn cost_to_target(&self, input: &Input, target: u8, ctx: &mut BfsContext) -> i32 {
-        if target == 255 {
-            return 25000;
-        }
-
+    fn cost_to_target(&self, input: &Input, target_color: u8, ctx: &mut BfsContext) -> i32 {
         ctx.current_gen += 1;
         let mut head = 0;
         let mut tail = 0;
@@ -441,7 +435,8 @@ impl State {
             let u = ctx.q[head];
             head += 1;
 
-            if u == target {
+            // 特定のマスではなく、欲しい「色」が見つかったらその距離を返す！
+            if self.f[u as usize] == target_color {
                 return ctx.dist[u as usize];
             }
 
@@ -455,12 +450,13 @@ impl State {
                 if ni >= 0 && ni < input.N as isize && nj >= 0 && nj < input.N as isize {
                     let v = (ni * 16 + nj) as u8;
                     if !get_bit(&self.body_bits, v) {
-                        let is_wrong_food = self.f[v as usize] != 0 && v != target;
+                        // 間違った色も障害物扱い
+                        let is_wrong_food =
+                            self.f[v as usize] != 0 && self.f[v as usize] != target_color;
                         if is_wrong_food {
                             continue;
                         }
 
-                        // 世代管理によるdist配列の更新チェック
                         if ctx.r#gen[v as usize] != ctx.current_gen || ctx.dist[v as usize] > d + 10
                         {
                             ctx.r#gen[v as usize] = ctx.current_gen;
@@ -472,13 +468,12 @@ impl State {
                 }
             }
         }
-        25000
+        25000 // 盤面のどこを探しても欲しい色に到達できない場合のみ詰み
     }
 
     fn evaluate(
         &self,
         input: &Input,
-        target_seq: &[u8],
         target_path_dist: &[i64],
         bfs_ctx: &mut BfsContext,
         panic_mode: bool,
@@ -488,43 +483,18 @@ impl State {
             return self.turn as i64 + 10000 * e as i64;
         }
         let base = self.turn as i64 + 10000 * (e as i64 + 2 * (input.M as i64 - self.len as i64));
-        let expected_pos = target_seq[self.len];
         let target_color = input.d[self.len] as u8;
 
-        let actual_target = if self.f[expected_pos as usize] == target_color {
-            expected_pos
-        } else {
-            let mut best_pos = 255;
-            let mut min_d = 1000;
-            let hi = (self.get_pos(0) / 16) as isize;
-            let hj = (self.get_pos(0) % 16) as isize;
-            for i in 0..input.N {
-                for j in 0..input.N {
-                    let idx = i * 16 + j;
-                    if self.f[idx] == target_color {
-                        let d = (hi - i as isize).abs() + (hj - j as isize).abs();
-                        if d < min_d {
-                            min_d = d;
-                            best_pos = idx as u8;
-                        }
-                    }
-                }
-            }
-            best_pos
-        };
-
-        let cost = self.cost_to_target(input, actual_target, bfs_ctx) as i64;
+        // マンハッタン距離でターゲットを絞り込む無駄な処理を全削除し、直接色を探させる
+        let cost = self.cost_to_target(input, target_color, bfs_ctx) as i64;
 
         let mut penalty_weight = 32500;
 
         if panic_mode || cost >= 20000 {
-            // 時間切れ間近、または目的の餌にたどり着けない（詰み）場合、
-            // 長さ不足ペナルティ(20000点)を避けるため、エラーを許容して手近な餌を食べる
             penalty_weight = 5000;
         }
 
         let heuristic_error_penalty = (penalty_weight * e * e * 2 / 3) as i64;
-
         let future_cost = target_path_dist[self.len] * 10;
 
         base + heuristic_error_penalty + cost + future_cost
@@ -551,13 +521,7 @@ fn main() {
     let mut tree = MoveTree::new();
     let mut bfs_ctx = BfsContext::new(); // BFS用コンテキストの初期化
 
-    let initial_state = State::new(
-        &input,
-        &target_seq,
-        &target_path_dist,
-        &mut tree,
-        &mut bfs_ctx,
-    );
+    let initial_state = State::new(&input, &target_path_dist, &mut tree, &mut bfs_ctx);
     let mut best_score: i64 = initial_state.score;
     let mut best_tree_id: u32 = initial_state.tree_node_id;
     let mut best_state = initial_state.clone();
@@ -615,7 +579,6 @@ fn main() {
                 if next_state.apply(
                     dir,
                     &input,
-                    &target_seq,
                     &target_path_dist,
                     dummy_id,
                     &mut bfs_ctx,
@@ -743,7 +706,6 @@ fn main() {
             final_state.apply(
                 dir as usize,
                 &input,
-                &target_seq,
                 &target_path_dist,
                 next_tree_id,
                 &mut bfs_ctx, // 追加
