@@ -2,7 +2,7 @@
 #![allow(unused_assignments)]
 
 use std::io::{BufRead, stdin};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 // =============================================
 // Scanner & Macros (unchanged)
@@ -64,25 +64,8 @@ macro_rules! input {
 // =============================================
 
 const TIME_LIMIT_MS: u64 = 1990;
-const SA_TIME_LIMIT_MS: u64 = 300;
 const DIJ: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
 const DIR_CHARS: [char; 4] = ['U', 'D', 'L', 'R'];
-
-struct XorShift(u32);
-impl XorShift {
-    fn new(seed: u32) -> Self {
-        Self(seed)
-    }
-    fn next(&mut self) -> u32 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 17;
-        self.0 ^= self.0 << 5;
-        self.0
-    }
-    fn next_usize(&mut self, m: usize) -> usize {
-        (self.next() as usize) % m
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct Input {
@@ -112,106 +95,6 @@ fn clear_bit(bits: &mut [u64; 4], pos: u8) {
 #[inline(always)]
 fn get_bit(bits: &[u64; 4], pos: u8) -> bool {
     (bits[(pos >> 6) as usize] >> (pos & 63)) & 1 != 0
-}
-
-// ---------------------------------------------------------
-// SA Layer (unchanged)
-// ---------------------------------------------------------
-fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
-    let start = Instant::now();
-    let mut rng = XorShift::new(42);
-    let mut foods = vec![vec![]; input.C + 1];
-    for i in 0..input.N {
-        for j in 0..input.N {
-            if input.f[i][j] > 0 {
-                foods[input.f[i][j]].push((i as isize, j as isize));
-            }
-        }
-    }
-
-    let mut targets = vec![(0isize, 0isize); input.M];
-    targets[0] = (0, 0);
-    targets[1] = (1, 0);
-    targets[2] = (2, 0);
-    targets[3] = (3, 0);
-    targets[4] = (4, 0);
-
-    let mut usage = vec![0; input.C + 1];
-    for k in 5..input.M {
-        let c = input.d[k];
-        targets[k] = foods[c][usage[c]];
-        usage[c] += 1;
-    }
-
-    let calc_score = |t: &[(isize, isize)]| -> i32 {
-        let mut score = 0;
-        for k in 5..input.M {
-            let dy = t[k].0 as i32 - t[k - 1].0 as i32;
-            let dx = t[k].1 as i32 - t[k - 1].1 as i32;
-            score += dy.abs() + dx.abs();
-            if k >= 6 {
-                let p_dy = t[k - 1].0 as i32 - t[k - 2].0 as i32;
-                let p_dx = t[k - 1].1 as i32 - t[k - 2].1 as i32;
-                let dot = dy * p_dy + dx * p_dx;
-                if dot < 0 {
-                    score += 1;
-                }
-            }
-        }
-        score
-    };
-
-    let mut cur_score = calc_score(&targets);
-    let mut best_targets = targets.clone();
-    let mut best_score = cur_score;
-
-    let mut pool_by_color = vec![vec![]; input.C + 1];
-    for k in 5..input.M {
-        pool_by_color[input.d[k]].push(k);
-    }
-    let valid: Vec<usize> = (1..=input.C)
-        .filter(|&c| pool_by_color[c].len() >= 2)
-        .collect();
-
-    if !valid.is_empty() {
-        let (t0, t1) = (15.0, 0.1);
-        let mut iter = 0;
-        loop {
-            if iter & 127 == 0 && start.elapsed() >= time_limit {
-                break;
-            }
-            iter += 1;
-            let c = valid[rng.next_usize(valid.len())];
-            let pool = &pool_by_color[c];
-            let u = pool[rng.next_usize(pool.len())];
-            let mut v = pool[rng.next_usize(pool.len())];
-            while u == v {
-                v = pool[rng.next_usize(pool.len())];
-            }
-
-            targets.swap(u, v);
-            let next_score = calc_score(&targets);
-            let accept = next_score <= cur_score || {
-                let temp =
-                    t0 + (t1 - t0) * (start.elapsed().as_secs_f64() / time_limit.as_secs_f64());
-                (rng.next() as f64 / std::u32::MAX as f64)
-                    < f64::exp((cur_score - next_score) as f64 / temp)
-            };
-            if accept {
-                cur_score = next_score;
-                if cur_score < best_score {
-                    best_score = cur_score;
-                    best_targets.copy_from_slice(&targets);
-                }
-            } else {
-                targets.swap(u, v);
-            }
-        }
-    }
-    best_targets
-        .iter()
-        .map(|&(i, j)| (i * 16 + j) as u8)
-        .collect()
 }
 
 // ---------------------------------------------------------
@@ -303,12 +186,7 @@ struct State {
 }
 
 impl State {
-    fn new(
-        input: &Input,
-        target_path_dist: &[i64],
-        tree: &mut MoveTree,
-        bfs_ctx: &mut BfsContext,
-    ) -> Self {
+    fn new(input: &Input, tree: &mut MoveTree, bfs_ctx: &mut BfsContext) -> Self {
         let mut f = [0u8; 256];
         for i in 0..input.N {
             for j in 0..input.N {
@@ -339,7 +217,7 @@ impl State {
             error_count: 0,
             tree_node_id: root_id,
         };
-        state.score = state.evaluate(input, target_path_dist, bfs_ctx, false);
+        state.score = state.evaluate(input, bfs_ctx, false);
         state
     }
 
@@ -352,7 +230,6 @@ impl State {
         &mut self,
         dir: usize,
         input: &Input,
-        target_path_dist: &[i64],
         new_tree_id: u32,
         bfs_ctx: &mut BfsContext,
         panic_mode: bool,
@@ -416,7 +293,7 @@ impl State {
 
         self.turn += 1;
         self.tree_node_id = new_tree_id;
-        self.score = self.evaluate(input, target_path_dist, bfs_ctx, panic_mode);
+        self.score = self.evaluate(input, bfs_ctx, panic_mode);
         true
     }
 
@@ -471,13 +348,7 @@ impl State {
         25000 // 盤面のどこを探しても欲しい色に到達できない場合のみ詰み
     }
 
-    fn evaluate(
-        &self,
-        input: &Input,
-        target_path_dist: &[i64],
-        bfs_ctx: &mut BfsContext,
-        panic_mode: bool,
-    ) -> i64 {
+    fn evaluate(&self, input: &Input, bfs_ctx: &mut BfsContext, panic_mode: bool) -> i64 {
         let e = self.error_count + 1;
         if self.len == input.M {
             return self.turn as i64 + 10000 * e as i64;
@@ -495,33 +366,21 @@ impl State {
         }
 
         let heuristic_error_penalty = (penalty_weight * e * e * 2 / 3) as i64;
-        let future_cost = target_path_dist[self.len] * 10;
 
-        base + heuristic_error_penalty + cost + future_cost
+        base + heuristic_error_penalty + cost
     }
 }
 
 fn main() {
     let start_time = Instant::now();
-    let sa_time_limit = Duration::from_millis(SA_TIME_LIMIT_MS);
 
     let mut sc = Scanner::new();
     let input = parse_input(&mut sc);
-    let target_seq = optimize_targets(&input, sa_time_limit);
-
-    let mut target_path_dist = vec![0i64; input.M + 1];
-    for len in (0..input.M - 1).rev() {
-        let p1 = target_seq[len];
-        let p2 = target_seq[len + 1];
-        let d = ((p1 / 16) as i64 - (p2 / 16) as i64).abs()
-            + ((p1 % 16) as i64 - (p2 % 16) as i64).abs();
-        target_path_dist[len] = target_path_dist[len + 1] + d;
-    }
 
     let mut tree = MoveTree::new();
     let mut bfs_ctx = BfsContext::new(); // BFS用コンテキストの初期化
 
-    let initial_state = State::new(&input, &target_path_dist, &mut tree, &mut bfs_ctx);
+    let initial_state = State::new(&input, &mut tree, &mut bfs_ctx);
     let mut best_score: i64 = initial_state.score;
     let mut best_tree_id: u32 = initial_state.tree_node_id;
     let mut best_state = initial_state.clone();
@@ -576,14 +435,7 @@ fn main() {
             for dir in 0..4 {
                 let mut next_state = state.clone();
                 let dummy_id = state.tree_node_id;
-                if next_state.apply(
-                    dir,
-                    &input,
-                    &target_path_dist,
-                    dummy_id,
-                    &mut bfs_ctx,
-                    panic_mode,
-                ) {
+                if next_state.apply(dir, &input, dummy_id, &mut bfs_ctx, panic_mode) {
                     let child_tree_id = tree.add_child(state.tree_node_id, dir as u8);
                     next_state.tree_node_id = child_tree_id;
                     next_beam.push(next_state);
@@ -706,7 +558,6 @@ fn main() {
             final_state.apply(
                 dir as usize,
                 &input,
-                &target_path_dist,
                 next_tree_id,
                 &mut bfs_ctx, // 追加
                 true,         // 追加 (panic_mode)
