@@ -524,18 +524,14 @@ fn main() {
         // --- 動的ビーム幅調整 ---
         // 残り時間が少なくなるにつれてビーム幅を狭くし、時間内に処理を間に合わせる。
         let remaining_time = TIME_LIMIT_MS.saturating_sub(elapsed_ms);
-        current_beam_width = if remaining_time < 50 {
+        current_beam_width = if remaining_time < 30 {
             30
-        } else if remaining_time < 100 {
-            100
         } else if remaining_time < 200 {
-            200
-        } else if remaining_time < 500 {
             500
-        } else if remaining_time < 1000 {
-            2000
+        } else if remaining_time < 750 {
+            750
         } else {
-            4000
+            5000
         };
 
         // 残り時間が極端に少ない場合は、ペナルティ評価を落とすパニックモードに入る
