@@ -560,6 +560,7 @@ fn main() {
     );
     let mut best_score: i64 = initial_state.score;
     let mut best_tree_id: u32 = initial_state.tree_node_id;
+    let mut best_state = initial_state.clone();
 
     let mut beam = vec![initial_state];
     let mut next_beam: Vec<State> = Vec::with_capacity(16384);
@@ -603,6 +604,7 @@ fn main() {
                 if state.score < best_score {
                     best_score = state.score;
                     best_tree_id = state.tree_node_id;
+                    best_state = state.clone();
                 }
                 continue;
             }
@@ -662,10 +664,97 @@ fn main() {
         if !beam.is_empty() && beam[0].score < best_score {
             best_score = beam[0].score;
             best_tree_id = beam[0].tree_node_id;
+            best_state = beam[0].clone();
         }
     }
 
-    let history = tree.reconstruct(best_tree_id);
+    let mut final_state = best_state.clone();
+    let mut final_tree_id = best_tree_id;
+
+    // 長さが M に達していない場合、ペナルティ回避のために手近な餌を何でも食べる
+    while final_state.len < input.M {
+        let mut dist = [25000i32; 256];
+        let mut parent_pos = [255u8; 256];
+        let mut parent_dir = [255u8; 256];
+        let mut q = [0u8; 256];
+        let mut head = 0;
+        let mut tail = 0;
+
+        let start = final_state.get_pos(0);
+        dist[start as usize] = 0;
+        q[tail] = start;
+        tail += 1;
+
+        let mut target_food = 255;
+
+        // BFSで最も近い餌（色問わず）を探す
+        while head < tail {
+            let u = q[head];
+            head += 1;
+
+            if final_state.f[u as usize] > 0 {
+                target_food = u;
+                break;
+            }
+
+            let d = dist[u as usize];
+            let ui = (u / 16) as isize;
+            let uj = (u % 16) as isize;
+
+            for dir in 0..4 {
+                let (di, dj) = DIJ[dir];
+                let ni = ui + di;
+                let nj = uj + dj;
+                if ni >= 0 && ni < input.N as isize && nj >= 0 && nj < input.N as isize {
+                    let v = (ni * 16 + nj) as u8;
+                    // Uターンや自分の体への衝突を壁として扱う
+                    if !get_bit(&final_state.body_bits, v) {
+                        if dist[v as usize] > d + 1 {
+                            dist[v as usize] = d + 1;
+                            parent_pos[v as usize] = u;
+                            parent_dir[v as usize] = dir as u8;
+                            q[tail] = v;
+                            tail += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if target_food == 255 {
+            break; // 完全な詰み（餌にたどり着けない）
+        }
+
+        // 経路の復元
+        let mut path = Vec::new();
+        let mut curr = target_food;
+        while curr != start {
+            path.push(parent_dir[curr as usize]);
+            curr = parent_pos[curr as usize];
+        }
+        path.reverse();
+
+        // 経路を適用してMoveTreeに強制的に履歴を追加
+        for dir in path {
+            let next_tree_id = tree.add_child(final_tree_id, dir);
+
+            // ※ applyの引数は現在の実装に合わせて調整してください
+            // もし bfs_ctx や panic_mode がある場合は、適当なダミーを渡してOKです
+            final_state.apply(
+                dir as usize,
+                &input,
+                &target_seq,
+                &target_path_dist,
+                next_tree_id,
+                &mut bfs_ctx, // 追加
+                true,         // 追加 (panic_mode)
+            );
+            final_tree_id = next_tree_id;
+        }
+    }
+
+    // 最終的に延長された履歴を復元する
+    let history = tree.reconstruct(final_tree_id);
     for &dir in &history {
         println!("{}", DIR_CHARS[dir as usize]);
     }
