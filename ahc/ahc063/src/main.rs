@@ -553,21 +553,25 @@ fn main() {
         current_generation += 1;
 
         let remaining_time = TIME_LIMIT_MS.saturating_sub(elapsed_ms);
-        if remaining_time < 50 {
-            current_beam_width = 30;
-        } else if remaining_time < 100 {
-            current_beam_width = 100;
-        } else if remaining_time < 200 {
-            current_beam_width = 200;
-        } else if remaining_time < 500 {
-            current_beam_width = 500;
-        } else if remaining_time < 1000 {
-            current_beam_width = 2000;
-        } else {
-            current_beam_width = 4000;
-        }
 
-        let panic_mode = remaining_time < 300; // 残り300msを切ったら妥協モード開始
+        // 進行度（先頭の優秀な状態の長さを基準とする）
+        let progress = beam[0].len as f64 / input.M as f64;
+
+        current_beam_width = if remaining_time < 100 {
+            // 本当に時間ギリギリの時だけ処理落ちを防ぐために絞る
+            100
+        } else if progress < 0.3 {
+            // 序盤（長さ30%未満）は簡単なので幅を絞って時間を節約
+            500
+        } else if progress < 0.7 {
+            // 中盤は少し広げる
+            2000
+        } else {
+            // 終盤（長さ70%以上）に一番幅を広くして複雑な盤面を解き切る
+            4000
+        };
+
+        let panic_mode = remaining_time < 100; // パニックモードの突入もギリギリ(残り100ms)まで我慢させる
 
         next_beam.clear();
 
