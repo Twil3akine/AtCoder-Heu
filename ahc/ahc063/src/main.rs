@@ -340,7 +340,7 @@ impl State {
             error_count: 0,
             tree_node_id: root_id,
         };
-        state.score = state.evaluate(input, target_seq, target_path_dist, bfs_ctx);
+        state.score = state.evaluate(input, target_seq, target_path_dist, bfs_ctx, false);
         state
     }
 
@@ -357,6 +357,7 @@ impl State {
         target_path_dist: &[i64],
         new_tree_id: u32,
         bfs_ctx: &mut BfsContext,
+        panic_mode: bool,
     ) -> bool {
         let head_pos = self.get_pos(0);
         let hi = (head_pos / 16) as isize;
@@ -417,7 +418,7 @@ impl State {
 
         self.turn += 1;
         self.tree_node_id = new_tree_id;
-        self.score = self.evaluate(input, target_seq, target_path_dist, bfs_ctx);
+        self.score = self.evaluate(input, target_seq, target_path_dist, bfs_ctx, panic_mode);
         true
     }
 
@@ -480,6 +481,7 @@ impl State {
         target_seq: &[u8],
         target_path_dist: &[i64],
         bfs_ctx: &mut BfsContext,
+        panic_mode: bool,
     ) -> i64 {
         let e = self.error_count + 1;
         if self.len == input.M {
@@ -512,7 +514,17 @@ impl State {
         };
 
         let cost = self.cost_to_target(input, actual_target, bfs_ctx) as i64;
-        let heuristic_error_penalty = (32500 * e * e * 2 / 3) as i64;
+
+        let mut penalty_weight = 32500;
+
+        if panic_mode || cost >= 20000 {
+            // 時間切れ間近、または目的の餌にたどり着けない（詰み）場合、
+            // 長さ不足ペナルティ(20000点)を避けるため、エラーを許容して手近な餌を食べる
+            penalty_weight = 5000;
+        }
+
+        let heuristic_error_penalty = (penalty_weight * e * e * 2 / 3) as i64;
+
         let future_cost = target_path_dist[self.len] * 10;
 
         base + heuristic_error_penalty + cost + future_cost
@@ -582,6 +594,8 @@ fn main() {
             current_beam_width = 4000;
         }
 
+        let panic_mode = remaining_time < 300; // 残り300msを切ったら妥協モード開始
+
         next_beam.clear();
 
         for state in &beam {
@@ -603,6 +617,7 @@ fn main() {
                     &target_path_dist,
                     dummy_id,
                     &mut bfs_ctx,
+                    panic_mode,
                 ) {
                     let child_tree_id = tree.add_child(state.tree_node_id, dir as u8);
                     next_state.tree_node_id = child_tree_id;
