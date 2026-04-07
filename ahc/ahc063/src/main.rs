@@ -5,7 +5,7 @@ use std::io::{BufRead, stdin};
 use std::time::{Duration, Instant};
 
 // =============================================
-// Scanner & Macros
+// Scanner & Macros (unchanged)
 // =============================================
 pub struct Scanner<R: std::io::BufRead> {
     pub reader: R,
@@ -65,7 +65,7 @@ macro_rules! input {
 
 const TIME_LIMIT_MS: u64 = 1990;
 const SA_TIME_LIMIT_MS: u64 = 300;
-const DIJ: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)]; // U, D, L, R
+const DIJ: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
 const DIR_CHARS: [char; 4] = ['U', 'D', 'L', 'R'];
 
 struct XorShift(u32);
@@ -99,7 +99,7 @@ pub fn parse_input<R: BufRead>(sc: &mut Scanner<R>) -> Input {
 }
 
 // ---------------------------------------------------------
-// Bitboard Utils
+// Bitboard Utils (unchanged)
 // ---------------------------------------------------------
 #[inline(always)]
 fn set_bit(bits: &mut [u64; 4], pos: u8) {
@@ -115,7 +115,7 @@ fn get_bit(bits: &[u64; 4], pos: u8) -> bool {
 }
 
 // ---------------------------------------------------------
-// 上位レイヤー：焼きなまし法
+// SA Layer (unchanged)
 // ---------------------------------------------------------
 fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
     let start = Instant::now();
@@ -149,17 +149,12 @@ fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
             let dy = t[k].0 as i32 - t[k - 1].0 as i32;
             let dx = t[k].1 as i32 - t[k - 1].1 as i32;
             score += dy.abs() + dx.abs();
-
-            // 鋭角なターン（折り返し）に対するペナルティ
             if k >= 6 {
                 let p_dy = t[k - 1].0 as i32 - t[k - 2].0 as i32;
                 let p_dx = t[k - 1].1 as i32 - t[k - 2].1 as i32;
-
                 let dot = dy * p_dy + dx * p_dx;
-
-                // 内積が負（進行方向が逆転気味）ならペナルティを加算
                 if dot < 0 {
-                    score += 1; // 重みを減らして影響を抑える（あるいはこの3行を一旦コメントアウト）
+                    score += 1;
                 }
             }
         }
@@ -220,7 +215,78 @@ fn optimize_targets(input: &Input, time_limit: Duration) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------
-// 下位レイヤー：ビームサーチ用状態管理 (ダイクストラ+A*評価)
+// Move Tree: Vec<u8> historyを各Stateから除去
+// ---------------------------------------------------------
+struct MoveTree {
+    parent: Vec<u32>,
+    dir: Vec<u8>,
+}
+
+impl MoveTree {
+    fn new() -> Self {
+        Self {
+            parent: Vec::with_capacity(1 << 20),
+            dir: Vec::with_capacity(1 << 20),
+        }
+    }
+
+    #[inline]
+    fn add_root(&mut self) -> u32 {
+        let id = self.parent.len() as u32;
+        self.parent.push(u32::MAX);
+        self.dir.push(0);
+        id
+    }
+
+    #[inline]
+    fn add_child(&mut self, parent_id: u32, d: u8) -> u32 {
+        let id = self.parent.len() as u32;
+        self.parent.push(parent_id);
+        self.dir.push(d);
+        id
+    }
+
+    fn reconstruct(&self, mut node_id: u32) -> Vec<u8> {
+        let mut dirs = Vec::new();
+        while node_id != u32::MAX {
+            let p = self.parent[node_id as usize];
+            if p != u32::MAX {
+                dirs.push(self.dir[node_id as usize]);
+            }
+            node_id = p;
+        }
+        dirs.reverse();
+        dirs
+    }
+}
+
+// ---------------------------------------------------------
+// Beam Search State (history removed, tree_node_id added)
+// ---------------------------------------------------------
+
+// ---------------------------------------------------------
+// BFS Context (世代管理用)
+// ---------------------------------------------------------
+struct BfsContext {
+    dist: [i32; 256],
+    r#gen: [u32; 256],
+    current_gen: u32,
+    q: [u8; 256],
+}
+
+impl BfsContext {
+    fn new() -> Self {
+        Self {
+            dist: [0; 256],
+            r#gen: [0; 256],
+            current_gen: 0,
+            q: [0; 256],
+        }
+    }
+}
+
+// ---------------------------------------------------------
+// Beam Search State
 // ---------------------------------------------------------
 #[derive(Clone)]
 struct State {
@@ -233,11 +299,17 @@ struct State {
     turn: usize,
     score: i64,
     error_count: usize,
-    history: Vec<u8>,
+    tree_node_id: u32,
 }
 
 impl State {
-    fn new(input: &Input, target_seq: &[u8], target_path_dist: &[i64]) -> Self {
+    fn new(
+        input: &Input,
+        target_seq: &[u8],
+        target_path_dist: &[i64],
+        tree: &mut MoveTree,
+        bfs_ctx: &mut BfsContext,
+    ) -> Self {
         let mut f = [0u8; 256];
         for i in 0..input.N {
             for j in 0..input.N {
@@ -254,6 +326,7 @@ impl State {
         }
 
         let c = [1u8; 256];
+        let root_id = tree.add_root();
 
         let mut state = Self {
             f,
@@ -265,9 +338,9 @@ impl State {
             turn: 0,
             score: 0,
             error_count: 0,
-            history: Vec::with_capacity(1024),
+            tree_node_id: root_id,
         };
-        state.score = state.evaluate(input, target_seq, target_path_dist);
+        state.score = state.evaluate(input, target_seq, target_path_dist, bfs_ctx);
         state
     }
 
@@ -282,6 +355,8 @@ impl State {
         input: &Input,
         target_seq: &[u8],
         target_path_dist: &[i64],
+        new_tree_id: u32,
+        bfs_ctx: &mut BfsContext,
     ) -> bool {
         let head_pos = self.get_pos(0);
         let hi = (head_pos / 16) as isize;
@@ -297,7 +372,7 @@ impl State {
         let new_pos = (ni * 16 + nj) as u8;
         if self.len > 1 && new_pos == self.get_pos(1) {
             return false;
-        } // Uターン禁止
+        }
 
         let eaten_color = self.f[new_pos as usize];
 
@@ -306,12 +381,9 @@ impl State {
             self.head_ptr = self.head_ptr.wrapping_sub(1);
             self.ij[self.head_ptr as usize] = new_pos;
             self.c[self.len] = eaten_color;
-
-            // 食べた色がターゲットと異なる場合はエラーを加算
             if input.d[self.len] != eaten_color as usize {
                 self.error_count += 1;
             }
-
             self.len += 1;
             set_bit(&mut self.body_bits, new_pos);
         } else {
@@ -335,47 +407,44 @@ impl State {
                     let pos = self.get_pos(p);
                     self.f[pos as usize] = self.c[p];
                     clear_bit(&mut self.body_bits, pos);
-
-                    // ちぎり落とした部分にエラーが含まれていた場合は減算
                     if input.d[p] != self.c[p] as usize {
                         self.error_count -= 1;
                     }
                 }
-
                 self.len = bite_idx + 1;
             }
         }
 
         self.turn += 1;
-        self.history.push(dir as u8);
-        self.score = self.evaluate(input, target_seq, target_path_dist);
+        self.tree_node_id = new_tree_id;
+        self.score = self.evaluate(input, target_seq, target_path_dist, bfs_ctx);
         true
     }
 
-    // BinaryHeapを廃止し、固定長配列を用いた超高速BFS
-    fn cost_to_target(&self, input: &Input, target: u8) -> i32 {
+    fn cost_to_target(&self, input: &Input, target: u8, ctx: &mut BfsContext) -> i32 {
         if target == 255 {
             return 25000;
         }
-        let mut dist = [25000i32; 256];
-        let mut q = [0u8; 256];
+
+        ctx.current_gen += 1;
         let mut head = 0;
         let mut tail = 0;
 
         let start = self.get_pos(0);
-        dist[start as usize] = 0;
-        q[tail] = start;
+        ctx.dist[start as usize] = 0;
+        ctx.r#gen[start as usize] = ctx.current_gen;
+        ctx.q[tail] = start;
         tail += 1;
 
         while head < tail {
-            let u = q[head];
+            let u = ctx.q[head];
             head += 1;
 
             if u == target {
-                return dist[u as usize];
+                return ctx.dist[u as usize];
             }
 
-            let d = dist[u as usize];
+            let d = ctx.dist[u as usize];
             let ui = (u / 16) as isize;
             let uj = (u % 16) as isize;
 
@@ -384,42 +453,39 @@ impl State {
                 let nj = uj + dj;
                 if ni >= 0 && ni < input.N as isize && nj >= 0 && nj < input.N as isize {
                     let v = (ni * 16 + nj) as u8;
-
-                    // 自分の体にはぶつかれない
                     if !get_bit(&self.body_bits, v) {
                         let is_wrong_food = self.f[v as usize] != 0 && v != target;
-
-                        // 誤食ルートはヒューリスティック探索から除外（壁とみなす）
-                        // これによりコストが均一化され、重いDijkstraが不要になる
                         if is_wrong_food {
                             continue;
                         }
 
-                        if dist[v as usize] > d + 10 {
-                            dist[v as usize] = d + 10;
-                            q[tail] = v;
+                        // 世代管理によるdist配列の更新チェック
+                        if ctx.r#gen[v as usize] != ctx.current_gen || ctx.dist[v as usize] > d + 10
+                        {
+                            ctx.r#gen[v as usize] = ctx.current_gen;
+                            ctx.dist[v as usize] = d + 10;
+                            ctx.q[tail] = v;
                             tail += 1;
                         }
                     }
                 }
             }
         }
-
         25000
     }
 
-    // A*ヒューリスティックによる真の評価関数
-    fn evaluate(&self, input: &Input, target_seq: &[u8], target_path_dist: &[i64]) -> i64 {
+    fn evaluate(
+        &self,
+        input: &Input,
+        target_seq: &[u8],
+        target_path_dist: &[i64],
+        bfs_ctx: &mut BfsContext,
+    ) -> i64 {
         let e = self.error_count + 1;
-
-        // ゴール到達時は正確なスコアを返す
         if self.len == input.M {
             return self.turn as i64 + 10000 * e as i64;
         }
-
-        // 基本となる絶対スコア
         let base = self.turn as i64 + 10000 * (e as i64 + 2 * (input.M as i64 - self.len as i64));
-
         let expected_pos = target_seq[self.len];
         let target_color = input.d[self.len] as u8;
 
@@ -445,14 +511,8 @@ impl State {
             best_pos
         };
 
-        // ダイクストラで算出した実質コスト（障害物・誤食ペナルティ込み）
-        let cost = self.cost_to_target(input, actual_target) as i64;
-
-        // AIが「色違いを食べると長さ不足ペナルティが減ってお得だ」と勘違いするのを防ぐため、
-        // 意図的にエラーに対して特大ペナルティ(15000)を乗せる
+        let cost = self.cost_to_target(input, actual_target, bfs_ctx) as i64;
         let heuristic_error_penalty = (32500 * e * e * 2 / 3) as i64;
-
-        // SAで作った理想ルートの残り距離
         let future_cost = target_path_dist[self.len] * 10;
 
         base + heuristic_error_penalty + cost + future_cost
@@ -465,7 +525,6 @@ fn main() {
 
     let mut sc = Scanner::new();
     let input = parse_input(&mut sc);
-
     let target_seq = optimize_targets(&input, sa_time_limit);
 
     let mut target_path_dist = vec![0i64; input.M + 1];
@@ -477,16 +536,28 @@ fn main() {
         target_path_dist[len] = target_path_dist[len + 1] + d;
     }
 
-    let initial_state = State::new(&input, &target_seq, &target_path_dist);
+    let mut tree = MoveTree::new();
+    let mut bfs_ctx = BfsContext::new(); // BFS用コンテキストの初期化
+
+    let initial_state = State::new(
+        &input,
+        &target_seq,
+        &target_path_dist,
+        &mut tree,
+        &mut bfs_ctx,
+    );
+    let mut best_score: i64 = initial_state.score;
+    let mut best_tree_id: u32 = initial_state.tree_node_id;
+
     let mut beam = vec![initial_state];
-    let mut best_state = beam[0].clone();
+    let mut next_beam: Vec<State> = Vec::with_capacity(16384);
 
-    let mut current_beam_width = 300;
+    // 改善点1: indicesのループ外確保
+    let mut indices: Vec<usize> = Vec::with_capacity(16384);
 
-    // 【究極のFastSet】世代管理配列
-    // 0/1のboolではなく、何ターン目に訪れたかを記録する
+    let mut current_beam_width: usize = 300;
     let mut seen_generation = vec![0u32; 65536];
-    let mut current_generation = 0;
+    let mut current_generation = 0u32;
 
     while !beam.is_empty() {
         let elapsed_ms = start_time.elapsed().as_millis() as u64;
@@ -494,38 +565,47 @@ fn main() {
             break;
         }
 
-        // ターンが進むごとに世代を更新（fill(0)を使わずにリセットしたのと同じ効果）
         current_generation += 1;
 
         let remaining_time = TIME_LIMIT_MS.saturating_sub(elapsed_ms);
-
-        current_beam_width = if remaining_time < 50 {
-            30
+        if remaining_time < 50 {
+            current_beam_width = 30;
         } else if remaining_time < 100 {
-            100
+            current_beam_width = 100;
         } else if remaining_time < 200 {
-            200
+            current_beam_width = 200;
         } else if remaining_time < 500 {
-            500
+            current_beam_width = 500;
         } else if remaining_time < 1000 {
-            2000
+            current_beam_width = 2000;
         } else {
-            4000
-        };
+            current_beam_width = 4000;
+        }
 
-        let mut next_beam = Vec::with_capacity(beam.len() * 4);
+        next_beam.clear();
 
         for state in &beam {
             if state.len == input.M && state.score == state.turn as i64 {
-                if state.score < best_state.score {
-                    best_state = state.clone();
+                if state.score < best_score {
+                    best_score = state.score;
+                    best_tree_id = state.tree_node_id;
                 }
                 continue;
             }
 
             for dir in 0..4 {
                 let mut next_state = state.clone();
-                if next_state.apply(dir, &input, &target_seq, &target_path_dist) {
+                let dummy_id = state.tree_node_id;
+                if next_state.apply(
+                    dir,
+                    &input,
+                    &target_seq,
+                    &target_path_dist,
+                    dummy_id,
+                    &mut bfs_ctx,
+                ) {
+                    let child_tree_id = tree.add_child(state.tree_node_id, dir as u8);
+                    next_state.tree_node_id = child_tree_id;
                     next_beam.push(next_state);
                 }
             }
@@ -535,36 +615,43 @@ fn main() {
             break;
         }
 
-        let mut indices: Vec<usize> = (0..next_beam.len()).collect();
+        // 改善点1 & 2: indicesの使い回しとselect_nth_unstable_by_keyの適用
+        indices.clear();
+        indices.extend(0..next_beam.len());
+
+        // 重複排除により数が減ることを考慮し、必要なビーム幅の2倍（余裕幅）を抽出
+        let margin_width = (current_beam_width * 2).min(next_beam.len());
+
+        if margin_width < next_beam.len() {
+            indices.select_nth_unstable_by_key(margin_width, |&i| next_beam[i].score);
+            indices.truncate(margin_width);
+        }
+
+        // 抽出した範囲内を厳密にソート
         indices.sort_unstable_by_key(|&i| next_beam[i].score);
 
-        let mut unique_states = Vec::with_capacity(current_beam_width);
+        beam.clear();
 
         for &i in &indices {
             let state = &next_beam[i];
-
-            // 【超重要】キーには絶対に body_bits を入れない！
-            // 頭の位置と長さだけで同一視することで、多様性を確保する
             let key = (state.get_pos(0) as usize) << 8 | state.len;
-
-            // 今の世代（ターン）でまだ見ていないキーなら追加
             if seen_generation[key] != current_generation {
                 seen_generation[key] = current_generation;
-                unique_states.push(state.clone());
-                if unique_states.len() == current_beam_width {
+                beam.push(state.clone());
+                if beam.len() == current_beam_width {
                     break;
                 }
             }
         }
 
-        if !unique_states.is_empty() && unique_states[0].score < best_state.score {
-            best_state = unique_states[0].clone();
+        if !beam.is_empty() && beam[0].score < best_score {
+            best_score = beam[0].score;
+            best_tree_id = beam[0].tree_node_id;
         }
-
-        beam = unique_states;
     }
 
-    for &dir in &best_state.history {
+    let history = tree.reconstruct(best_tree_id);
+    for &dir in &history {
         println!("{}", DIR_CHARS[dir as usize]);
     }
 }
