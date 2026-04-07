@@ -509,7 +509,7 @@ fn main() {
     let mut current_beam_width: usize = 300;
 
     // 似たような状態を排除（多様性確保）するためのハッシュテーブル代わり
-    let mut seen_generation = vec![0u32; 65536];
+    let mut seen_generation = vec![0u32; 1 << 20];
     let mut current_generation = 0u32;
 
     // --- ビームサーチ本体 ---
@@ -587,9 +587,10 @@ fn main() {
         // 重複排除処理
         for &i in &indices {
             let state = &next_beam[i];
-            // 状態の同一視キー: 「頭の位置 (8bit) + ヘビの長さ (8bit)」の計16bit。
+            // 頭の位置(8bit) + 長さ(8bit) + エラー数(4bitに丸める) で計20bit
             // これが一致する状態は「似ている」とみなし、スコアが良い最初の1つだけをビームに残す。
-            let key = (state.get_pos(0) as usize) << 8 | state.len;
+            let key =
+                (state.get_pos(0) as usize) << 12 | (state.len << 4) | (state.error_count.min(15));
             if seen_generation[key] != current_generation {
                 seen_generation[key] = current_generation;
                 beam.push(state.clone());
