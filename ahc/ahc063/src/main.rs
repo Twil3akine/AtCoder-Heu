@@ -511,8 +511,11 @@ fn main() {
     // デフォルトは全て0の配列（M >= 127 の場合はこれが使われ、SAのペナルティが実質無効化される）
     let mut target_path_dist = vec![0i64; input.M + 1];
 
-    // Mが127未満（盤面に空きがある）場合のみ、SAを実行して経路を計算する
-    if input.M < 127 {
+    // 盤面の総マス数の半分を計算
+    let half_board = (input.N * input.N) / 2 - 1;
+
+    // Mが盤面の半分未満（スカスカ）ならSAを実行、半分以上（ギチギチ）ならスキップ
+    if input.M < half_board {
         let target_seq = optimize_targets(&input, sa_time_limit);
         for len in (0..input.M - 1).rev() {
             let p1 = target_seq[len];
