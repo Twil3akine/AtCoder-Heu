@@ -103,6 +103,9 @@ def main():
     )
     parser.add_argument("-n", type=int, default=None, help="実行するファイル数の上限")
     parser.add_argument("-l", "--loop", type=int, default=1, help="各ケースの実行回数")
+    parser.add_argument(
+        "-m", type=int, default=None, help="Mがこれ以上のケースのみ実行する"
+    )
     args = parser.parse_args()
 
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -124,6 +127,15 @@ def main():
 
     input_files = [f for f in os.listdir(IN_DIR) if f.endswith(".txt")]
     input_files.sort()
+
+    if args.m is not None:
+        filtered_files = []
+        for f in input_files:
+            n, m, c = get_params(f)
+            if m >= args.m:
+                filtered_files.append(f)
+        input_files = filtered_files
+
     if args.n is not None:
         input_files = input_files[: args.n]
 
