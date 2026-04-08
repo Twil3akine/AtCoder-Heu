@@ -238,6 +238,24 @@ impl BfsContext {
     }
 }
 
+// =============================================
+// Zobrist Hash 用 XorShift
+// =============================================
+struct XorShift {
+    state: u64,
+}
+impl XorShift {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+    fn next(&mut self) -> u64 {
+        self.state ^= self.state << 13;
+        self.state ^= self.state >> 7;
+        self.state ^= self.state << 17;
+        self.state
+    }
+}
+
 // ---------------------------------------------------------
 // Beam Search State
 // ---------------------------------------------------------
@@ -508,8 +526,18 @@ fn main() {
 
     let mut current_beam_width: usize = 300;
 
-    // 似たような状態を排除（多様性確保）するためのハッシュテーブル代わり
-    let mut seen_generation = vec![0u32; 65536];
+    // --- Zobrist Hash 用のテーブル事前生成 ---
+    let mut rng = XorShift::new(1000000007);
+    let mut zobrist_pos = [0u64; 256];
+    let mut zobrist_len = [0u64; 256];
+    for i in 0..256 {
+        zobrist_pos[i] = rng.next();
+        zobrist_len[i] = rng.next();
+    }
+
+    // ハッシュ空間を20bit (1048576要素) に広げる
+    const HASH_MASK: usize = (1 << 20) - 1;
+    let mut seen_generation = vec![0u32; HASH_MASK + 1];
     let mut current_generation = 0u32;
 
     // --- ビームサーチ本体 ---
