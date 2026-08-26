@@ -1,0 +1,28 @@
+[package]
+name = "atcoder-heuristic"
+version = "0.1.0"
+edition = "2021"
+description = "Small, std-only Rust search templates for short AtCoder Heuristic Contests"
+license = "MIT"
+
+[lib]
+name = "atcoder_heuristic"
+path = "src/lib.rs"
+
+[dependencies]
+
+[[example]]
+name = "template-greedy"
+path = "templates/greedy.rs"
+
+[[example]]
+name = "template-annealing"
+path = "templates/annealing.rs"
+
+[[example]]
+name = "template-beam"
+path = "templates/beam.rs"
+
+[[example]]
+name = "template-hybrid"
+path = "templates/hybrid.rs"
