@@ -1,0 +1,11 @@
+[package]
+name = "cargo-bundle"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+prettyplease = "0.2"
+syn = { version = "2", features = ["full", "visit", "visit-mut"] }
+tempfile = "3"
+toml = "0.8"

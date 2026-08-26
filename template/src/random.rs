@@ -27,7 +27,10 @@ impl Random {
     }
 
     #[inline]
-    pub fn usize(&mut self, range: Range<usize>) -> usize {
+    pub fn usize(
+        &mut self,
+        range: Range<usize>,
+    ) -> usize {
         assert!(range.start < range.end, "random range must not be empty");
         range.start + self.next_u64() as usize % (range.end - range.start)
     }

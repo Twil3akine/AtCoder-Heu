@@ -1,7 +1,5 @@
 //! TSP simulated annealing: 2-opt evaluates only the two replaced edges.
-use std::io::{self, Read};
-
-use atcoder_heuristic::{anneal, AnnealConfig, Random};
+use atcoder_heuristic::{anneal, AnnealConfig, Input, Output, Random};
 
 type Point = (i64, i64);
 
@@ -19,21 +17,35 @@ struct TwoOpt {
     diff: i64,
 }
 
-fn edge_cost(points: &[Point], a: usize, b: usize) -> i64 {
+fn edge_cost(
+    points: &[Point],
+    a: usize,
+    b: usize,
+) -> i64 {
     let dx = points[a].0 - points[b].0;
     let dy = points[a].1 - points[b].1;
     dx * dx + dy * dy
 }
 
-fn tour_cost(route: &[usize], points: &[Point]) -> i64 {
+fn tour_cost(
+    route: &[usize],
+    points: &[Point],
+) -> i64 {
     (0..route.len())
         .map(|i| edge_cost(points, route[i], route[(i + 1) % route.len()]))
         .sum()
 }
 
 /// Score change for reversing route[left..=right]. Only two edges change.
-fn two_opt_diff(state: &State, left: usize, right: usize, points: &[Point]) -> i64 {
-    let n = state.route.len();
+fn two_opt_diff(
+    state: &State,
+    left: usize,
+    right: usize,
+    points: &[Point],
+) -> i64 {
+    let n = state
+        .route
+        .len();
     let a = state.route[left - 1];
     let b = state.route[left];
     let c = state.route[right];
@@ -43,7 +55,10 @@ fn two_opt_diff(state: &State, left: usize, right: usize, points: &[Point]) -> i
     old - new
 }
 
-fn apply_two_opt(state: &mut State, mv: TwoOpt) {
+fn apply_two_opt(
+    state: &mut State,
+    mv: TwoOpt,
+) {
     state.route[mv.left..=mv.right].reverse();
     for index in mv.left..=mv.right {
         state.position[state.route[index]] = index;
@@ -51,10 +66,15 @@ fn apply_two_opt(state: &mut State, mv: TwoOpt) {
     state.score += mv.diff;
 }
 
-fn nearest_candidates(points: &[Point], k: usize) -> Vec<Vec<usize>> {
+fn nearest_candidates(
+    points: &[Point],
+    k: usize,
+) -> Vec<Vec<usize>> {
     (0..points.len())
         .map(|from| {
-            let mut others: Vec<usize> = (0..points.len()).filter(|&to| to != from).collect();
+            let mut others: Vec<usize> = (0..points.len())
+                .filter(|&to| to != from)
+                .collect();
             others.sort_unstable_by_key(|&to| edge_cost(points, from, to));
             others.truncate(k.min(others.len()));
             others
@@ -62,33 +82,31 @@ fn nearest_candidates(points: &[Point], k: usize) -> Vec<Vec<usize>> {
         .collect()
 }
 
-fn read_points() -> Vec<Point> {
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input).unwrap();
-    let mut it = input.split_whitespace();
-    let Some(n) = it.next().and_then(|x| x.parse::<usize>().ok()) else {
+fn read_points(input: &mut Input) -> Vec<Point> {
+    if !input.has_next() {
         return vec![(0, 0), (4, 0), (7, 3), (6, 8), (1, 9), (-2, 4)];
-    };
+    }
+    let n: usize = input.read();
     (0..n)
-        .map(|_| {
-            let x = it.next().unwrap().parse().unwrap();
-            let y = it.next().unwrap().parse().unwrap();
-            (x, y)
-        })
+        .map(|_| (input.read(), input.read()))
         .collect()
 }
 
 fn main() {
-    let points = read_points();
+    let mut input = Input::new();
+    let mut output = Output::new();
+    let points = read_points(&mut input);
     if points.len() < 4 {
-        for city in 0..points.len() {
-            println!("{}", city);
-        }
+        output.join_line(0..points.len());
+        output.flush();
         return;
     }
     let route: Vec<usize> = (0..points.len()).collect();
     let mut position = vec![0; points.len()];
-    for (index, &city) in route.iter().enumerate() {
+    for (index, &city) in route
+        .iter()
+        .enumerate()
+    {
         position[city] = index;
     }
     let initial = State {
@@ -103,7 +121,9 @@ fn main() {
         AnnealConfig::new(1900, 5_000.0, 1.0),
         |state| state.score,
         |state, random: &mut Random| {
-            let n = state.route.len();
+            let n = state
+                .route
+                .len();
             let city = state.route[random.usize(1..n)];
             let mut endpoint = city;
             for _ in 0..4 {
@@ -131,9 +151,12 @@ fn main() {
         },
         apply_two_opt,
     );
-    for city in result.state.route {
-        println!("{}", city);
-    }
+    output.join_line(
+        result
+            .state
+            .route,
+    );
+    output.flush();
 }
 
 #[cfg(test)]
@@ -163,10 +186,16 @@ mod tests {
         let after = tour_cost(&state.route, &points);
         assert_eq!(diff, before - after);
         assert_eq!(state.score, -after);
-        let mut permutation = state.route.clone();
+        let mut permutation = state
+            .route
+            .clone();
         permutation.sort_unstable();
         assert_eq!(permutation, (0..points.len()).collect::<Vec<_>>());
-        for (index, &city) in state.route.iter().enumerate() {
+        for (index, &city) in state
+            .route
+            .iter()
+            .enumerate()
+        {
             assert_eq!(state.position[city], index);
         }
     }

@@ -1,5 +1,5 @@
 // Copy this file to `src/main.rs` after copying the required crate modules.
-use atcoder_heuristic::{anneal, AnnealConfig, Random, Timer};
+use atcoder_heuristic::{anneal, AnnealConfig, Input, Output, Random, Timer};
 
 #[derive(Clone)]
 struct State {
@@ -8,13 +8,18 @@ struct State {
 }
 
 fn main() {
+    let mut input = Input::new();
+    let _ = &mut input;
+    let mut output = Output::new();
     // TODO: problem specific input and constructive greedy initialization.
     let timer = Timer::new(100);
     let mut random = Random::new(0);
     let mut initial = State { score: 0 };
     while !timer.is_over() {
         // TODO: problem specific greedy construction; retain the best initial state.
-        initial.score = initial.score.max(if random.bool() { 1 } else { 0 });
+        initial.score = initial
+            .score
+            .max(if random.bool() { 1 } else { 0 });
     }
 
     let result = anneal(
@@ -25,5 +30,6 @@ fn main() {
         |_, _| {},                      // TODO: problem specific apply
     );
     // TODO: problem specific output
-    println!("{}", result.score);
+    output.println(result.score);
+    output.flush();
 }

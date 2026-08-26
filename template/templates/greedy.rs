@@ -1,5 +1,5 @@
 // Copy this file to `src/main.rs` after copying the required crate modules.
-use atcoder_heuristic::{Random, Timer};
+use atcoder_heuristic::{Input, Output, Random, Timer};
 
 #[derive(Clone)]
 struct State {
@@ -8,6 +8,9 @@ struct State {
 }
 
 fn main() {
+    let mut input = Input::new();
+    let _ = &mut input;
+    let mut output = Output::new();
     // TODO: problem specific input and initial solution
     let mut current = State { score: 0 };
     let mut best = current.clone();
@@ -26,5 +29,6 @@ fn main() {
     }
 
     // TODO: problem specific output
-    println!("{}", best.score);
+    output.println(best.score);
+    output.flush();
 }

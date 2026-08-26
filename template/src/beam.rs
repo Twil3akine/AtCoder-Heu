@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::Timer;
+use crate::timer::Timer;
 
 #[derive(Clone, Copy)]
 pub struct BeamConfig {
@@ -141,9 +141,14 @@ where
             break;
         }
 
-        let selected_len = candidates.len().min(width);
+        let selected_len = candidates
+            .len()
+            .min(width);
         if candidates.len() > selected_len {
-            candidates.select_nth_unstable_by(selected_len, |a, b| b.eval.cmp(&a.eval));
+            candidates.select_nth_unstable_by(selected_len, |a, b| {
+                b.eval
+                    .cmp(&a.eval)
+            });
             candidates.truncate(selected_len);
         }
         next_beam.clear();
@@ -162,14 +167,19 @@ where
         }
         std::mem::swap(&mut beam, &mut next_beam);
 
-        let elapsed = turn_start.elapsed().as_secs_f64();
+        let elapsed = turn_start
+            .elapsed()
+            .as_secs_f64();
         let sample = (expanded > 0).then(|| elapsed / expanded as f64);
         ema_cost = update_ema(ema_cost, sample, config.ema);
         #[cfg(test)]
         if let Some(diag) = diagnostics.as_mut() {
-            diag.widths.push(width);
-            diag.expanded.push(expanded);
-            diag.selected.push(selected_len);
+            diag.widths
+                .push(width);
+            diag.expanded
+                .push(expanded);
+            diag.selected
+                .push(selected_len);
             diag.ema_cost = ema_cost;
         }
 
@@ -177,7 +187,9 @@ where
             width = next_width(
                 width,
                 config,
-                timer.remaining().as_secs_f64(),
+                timer
+                    .remaining()
+                    .as_secs_f64(),
                 turns - turn - 1,
                 ema_cost,
             );
@@ -206,12 +218,32 @@ where
 fn validate_config(config: BeamConfig) {
     assert!(config.min_width >= 1, "min_width must be at least one");
     assert!(config.min_width <= config.max_width);
-    assert!(config.safety.is_finite() && config.safety > 0.0 && config.safety <= 1.0);
-    assert!(config.ema.is_finite() && (0.0..=1.0).contains(&config.ema));
-    assert!(config.width_change.is_finite() && (0.0..=1.0).contains(&config.width_change));
+    assert!(
+        config
+            .safety
+            .is_finite()
+            && config.safety > 0.0
+            && config.safety <= 1.0
+    );
+    assert!(
+        config
+            .ema
+            .is_finite()
+            && (0.0..=1.0).contains(&config.ema)
+    );
+    assert!(
+        config
+            .width_change
+            .is_finite()
+            && (0.0..=1.0).contains(&config.width_change)
+    );
 }
 
-fn update_ema(previous: Option<f64>, sample: Option<f64>, alpha: f64) -> Option<f64> {
+fn update_ema(
+    previous: Option<f64>,
+    sample: Option<f64>,
+    alpha: f64,
+) -> Option<f64> {
     let Some(sample) = sample.filter(|value| value.is_finite() && *value > 0.0) else {
         return previous;
     };
@@ -251,7 +283,10 @@ fn next_width(
         .clamp(config.min_width, config.max_width)
 }
 
-fn restore_actions<A: Clone>(node_id: usize, nodes: &[BeamNode<A>]) -> Vec<A> {
+fn restore_actions<A: Clone>(
+    node_id: usize,
+    nodes: &[BeamNode<A>],
+) -> Vec<A> {
     let mut actions = Vec::new();
     let mut current = node_id;
     while let Some(parent) = nodes[current].parent {
@@ -307,13 +342,33 @@ mod tests {
             },
             Some(&mut diagnostics),
         );
-        assert_eq!(result.actions.len(), 4);
-        assert_eq!(result.state, result.actions.iter().sum());
-        assert!(diagnostics.widths.iter().all(|&w| (1..=2).contains(&w)));
-        assert!(diagnostics.selected.iter().all(|&n| n <= 2));
+        assert_eq!(
+            result
+                .actions
+                .len(),
+            4
+        );
+        assert_eq!(
+            result.state,
+            result
+                .actions
+                .iter()
+                .sum()
+        );
+        assert!(diagnostics
+            .widths
+            .iter()
+            .all(|&w| (1..=2).contains(&w)));
+        assert!(diagnostics
+            .selected
+            .iter()
+            .all(|&n| n <= 2));
         assert_eq!(
             diagnostics.node_count,
-            1 + diagnostics.selected.iter().sum::<usize>()
+            1 + diagnostics
+                .selected
+                .iter()
+                .sum::<usize>()
         );
         let parent_action_slots = diagnostics.node_count - 1;
         let copied_history_slots: usize = diagnostics
@@ -340,7 +395,9 @@ mod tests {
         );
         assert_eq!(result.state, 7);
         assert_eq!(result.eval, 0);
-        assert!(result.actions.is_empty());
+        assert!(result
+            .actions
+            .is_empty());
     }
 
     #[test]
@@ -389,7 +446,12 @@ mod tests {
         const N: usize = 400_000;
         const K: usize = 10_000;
         let values: Vec<i64> = (0..N)
-            .map(|i| ((i as u64).wrapping_mul(1_103_515_245).rotate_left(17) >> 1) as i64)
+            .map(|i| {
+                ((i as u64)
+                    .wrapping_mul(1_103_515_245)
+                    .rotate_left(17)
+                    >> 1) as i64
+            })
             .collect();
 
         let mut sorted = values.clone();
@@ -407,8 +469,10 @@ mod tests {
         sorted.sort_unstable();
         selected.sort_unstable();
         assert_eq!(selected, sorted);
-        let ratio =
-            sort_elapsed.as_secs_f64() / select_elapsed.as_secs_f64().max(f64::MIN_POSITIVE);
+        let ratio = sort_elapsed.as_secs_f64()
+            / select_elapsed
+                .as_secs_f64()
+                .max(f64::MIN_POSITIVE);
         eprintln!(
             "top-k: sort={sort_elapsed:?}, select={select_elapsed:?}, sort/select={ratio:.2}"
         );
@@ -437,7 +501,9 @@ mod tests {
             |state, _turn, out| {
                 let mut work = *state as u64;
                 for i in 0..2_000u64 {
-                    work = work.wrapping_mul(1_664_525).wrapping_add(i);
+                    work = work
+                        .wrapping_mul(1_664_525)
+                        .wrapping_add(i);
                 }
                 black_box(work);
                 out.push((state + 1, (state + 1) as i64, 1u8));
@@ -447,12 +513,43 @@ mod tests {
             Some(&mut diagnostics),
         );
         let elapsed = start.elapsed();
-        assert!(!diagnostics.widths.is_empty());
-        assert!(diagnostics.widths.len() >= 2);
-        assert_eq!(result.actions.len(), diagnostics.widths.len());
-        assert_eq!(diagnostics.expanded.len(), diagnostics.selected.len());
-        assert_eq!(diagnostics.expanded.len(), diagnostics.widths.len());
-        assert!(diagnostics.expanded.iter().all(|&expanded| expanded > 0));
+        assert!(!diagnostics
+            .widths
+            .is_empty());
+        assert!(
+            diagnostics
+                .widths
+                .len()
+                >= 2
+        );
+        assert_eq!(
+            result
+                .actions
+                .len(),
+            diagnostics
+                .widths
+                .len()
+        );
+        assert_eq!(
+            diagnostics
+                .expanded
+                .len(),
+            diagnostics
+                .selected
+                .len()
+        );
+        assert_eq!(
+            diagnostics
+                .expanded
+                .len(),
+            diagnostics
+                .widths
+                .len()
+        );
+        assert!(diagnostics
+            .expanded
+            .iter()
+            .all(|&expanded| expanded > 0));
         assert!(diagnostics
             .selected
             .iter()
@@ -464,7 +561,10 @@ mod tests {
         assert!(diagnostics
             .ema_cost
             .is_some_and(|cost| cost.is_finite() && cost > 0.0));
-        for pair in diagnostics.widths.windows(2) {
+        for pair in diagnostics
+            .widths
+            .windows(2)
+        {
             let delta = ((pair[0] as f64 * config.width_change).ceil() as usize).max(1);
             assert!(pair[1] >= pair[0].saturating_sub(delta));
             assert!(pair[1] <= pair[0].saturating_add(delta));
@@ -472,7 +572,10 @@ mod tests {
         assert!((0.050..=1.0).contains(&elapsed.as_secs_f64()));
         eprintln!(
             "dynamic-width: elapsed={elapsed:?}, expanded={}, nodes={}",
-            diagnostics.expanded.iter().sum::<usize>(),
+            diagnostics
+                .expanded
+                .iter()
+                .sum::<usize>(),
             diagnostics.node_count,
         );
     }

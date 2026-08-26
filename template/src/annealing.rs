@@ -1,4 +1,4 @@
-use crate::{Random, Timer};
+use crate::{random::Random, timer::Timer};
 
 #[derive(Clone, Copy)]
 pub struct AnnealConfig {
@@ -10,7 +10,11 @@ pub struct AnnealConfig {
 }
 
 impl AnnealConfig {
-    pub fn new(time_limit_ms: u64, start_temp: f64, end_temp: f64) -> Self {
+    pub fn new(
+        time_limit_ms: u64,
+        start_temp: f64,
+        end_temp: f64,
+    ) -> Self {
         Self {
             time_limit_ms,
             start_temp,
@@ -54,8 +58,18 @@ where
     Propose: FnMut(&S, &mut Random) -> (M, i64),
     Apply: FnMut(&mut S, M),
 {
-    assert!(config.start_temp.is_finite() && config.start_temp > 0.0);
-    assert!(config.end_temp.is_finite() && config.end_temp > 0.0);
+    assert!(
+        config
+            .start_temp
+            .is_finite()
+            && config.start_temp > 0.0
+    );
+    assert!(
+        config
+            .end_temp
+            .is_finite()
+            && config.end_temp > 0.0
+    );
     assert!(config.check_interval >= 1);
 
     let timer = Timer::new(config.time_limit_ms);
@@ -142,13 +156,28 @@ mod tests {
                 check_interval: 1,
             },
             |s| s.0,
-            |_, _| (moves.next().unwrap(), 7),
+            |_, _| {
+                (
+                    moves
+                        .next()
+                        .unwrap(),
+                    7,
+                )
+            },
             |s, delta| s.0 += delta,
             |iteration| (iteration == 0).then_some(0.0),
         );
-        assert_eq!(run.current.0, 7);
+        assert_eq!(
+            run.current
+                .0,
+            7
+        );
         assert_eq!(run.current_score, 7);
-        assert_eq!(run.best.0, 7);
+        assert_eq!(
+            run.best
+                .0,
+            7
+        );
         assert_eq!(run.best_score, 7);
     }
 
@@ -166,15 +195,25 @@ mod tests {
             },
             |s| s.0,
             |_, _| {
-                let delta = moves.next().unwrap();
+                let delta = moves
+                    .next()
+                    .unwrap();
                 (delta, delta)
             },
             |s, delta| s.0 += delta,
             |iteration| (iteration < 3).then_some(0.0),
         );
-        assert_eq!(run.current.0, 3);
+        assert_eq!(
+            run.current
+                .0,
+            3
+        );
         assert_eq!(run.current_score, 3);
-        assert_eq!(run.best.0, 5);
+        assert_eq!(
+            run.best
+                .0,
+            5
+        );
         assert_eq!(run.best_score, 5);
     }
 

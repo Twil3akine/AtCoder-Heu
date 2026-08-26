@@ -34,13 +34,19 @@ impl<const WORDS: usize> BitSet<WORDS> {
     }
 
     #[inline]
-    pub fn contains(&self, index: usize) -> bool {
+    pub fn contains(
+        &self,
+        index: usize,
+    ) -> bool {
         self.assert_index(index);
         self.words[index / 64] & (1u64 << (index % 64)) != 0
     }
 
     #[inline]
-    pub fn insert(&mut self, index: usize) -> bool {
+    pub fn insert(
+        &mut self,
+        index: usize,
+    ) -> bool {
         self.assert_index(index);
         let word = &mut self.words[index / 64];
         let bit = 1u64 << (index % 64);
@@ -50,7 +56,10 @@ impl<const WORDS: usize> BitSet<WORDS> {
     }
 
     #[inline]
-    pub fn remove(&mut self, index: usize) -> bool {
+    pub fn remove(
+        &mut self,
+        index: usize,
+    ) -> bool {
         self.assert_index(index);
         let word = &mut self.words[index / 64];
         let bit = 1u64 << (index % 64);
@@ -60,7 +69,10 @@ impl<const WORDS: usize> BitSet<WORDS> {
     }
 
     #[inline]
-    pub fn toggle(&mut self, index: usize) {
+    pub fn toggle(
+        &mut self,
+        index: usize,
+    ) {
         self.assert_index(index);
         self.words[index / 64] ^= 1u64 << (index % 64);
     }
@@ -79,20 +91,33 @@ impl<const WORDS: usize> BitSet<WORDS> {
     }
 
     #[inline]
-    pub fn intersects(&self, other: &Self) -> bool {
+    pub fn intersects(
+        &self,
+        other: &Self,
+    ) -> bool {
         self.words
             .iter()
-            .zip(other.words.iter())
+            .zip(
+                other
+                    .words
+                    .iter(),
+            )
             .any(|(a, b)| *a & *b != 0)
     }
 
     #[inline]
-    pub fn is_disjoint(&self, other: &Self) -> bool {
+    pub fn is_disjoint(
+        &self,
+        other: &Self,
+    ) -> bool {
         !self.intersects(other)
     }
 
     #[inline]
-    pub fn difference(&self, other: &Self) -> Self {
+    pub fn difference(
+        &self,
+        other: &Self,
+    ) -> Self {
         let mut result = Self::new();
         for i in 0..WORDS {
             result.words[i] = self.words[i] & !other.words[i];
@@ -101,11 +126,17 @@ impl<const WORDS: usize> BitSet<WORDS> {
     }
 
     #[inline]
-    fn assert_index(&self, index: usize) {
+    fn assert_index(
+        &self,
+        index: usize,
+    ) {
         assert!(index < Self::bit_len(), "bit index out of range");
     }
 
-    fn shifted_left(&self, amount: usize) -> Self {
+    fn shifted_left(
+        &self,
+        amount: usize,
+    ) -> Self {
         if amount >= Self::bit_len() {
             return Self::new();
         }
@@ -122,7 +153,10 @@ impl<const WORDS: usize> BitSet<WORDS> {
         result
     }
 
-    fn shifted_right(&self, amount: usize) -> Self {
+    fn shifted_right(
+        &self,
+        amount: usize,
+    ) -> Self {
         if amount >= Self::bit_len() {
             return Self::new();
         }
@@ -142,13 +176,19 @@ impl<const WORDS: usize> BitSet<WORDS> {
 
 impl<const WORDS: usize> BitAnd for BitSet<WORDS> {
     type Output = Self;
-    fn bitand(mut self, rhs: Self) -> Self {
+    fn bitand(
+        mut self,
+        rhs: Self,
+    ) -> Self {
         self &= rhs;
         self
     }
 }
 impl<const WORDS: usize> BitAndAssign for BitSet<WORDS> {
-    fn bitand_assign(&mut self, rhs: Self) {
+    fn bitand_assign(
+        &mut self,
+        rhs: Self,
+    ) {
         for i in 0..WORDS {
             self.words[i] &= rhs.words[i];
         }
@@ -156,13 +196,19 @@ impl<const WORDS: usize> BitAndAssign for BitSet<WORDS> {
 }
 impl<const WORDS: usize> BitOr for BitSet<WORDS> {
     type Output = Self;
-    fn bitor(mut self, rhs: Self) -> Self {
+    fn bitor(
+        mut self,
+        rhs: Self,
+    ) -> Self {
         self |= rhs;
         self
     }
 }
 impl<const WORDS: usize> BitOrAssign for BitSet<WORDS> {
-    fn bitor_assign(&mut self, rhs: Self) {
+    fn bitor_assign(
+        &mut self,
+        rhs: Self,
+    ) {
         for i in 0..WORDS {
             self.words[i] |= rhs.words[i];
         }
@@ -170,13 +216,19 @@ impl<const WORDS: usize> BitOrAssign for BitSet<WORDS> {
 }
 impl<const WORDS: usize> BitXor for BitSet<WORDS> {
     type Output = Self;
-    fn bitxor(mut self, rhs: Self) -> Self {
+    fn bitxor(
+        mut self,
+        rhs: Self,
+    ) -> Self {
         self ^= rhs;
         self
     }
 }
 impl<const WORDS: usize> BitXorAssign for BitSet<WORDS> {
-    fn bitxor_assign(&mut self, rhs: Self) {
+    fn bitxor_assign(
+        &mut self,
+        rhs: Self,
+    ) {
         for i in 0..WORDS {
             self.words[i] ^= rhs.words[i];
         }
@@ -193,13 +245,19 @@ impl<const WORDS: usize> Not for BitSet<WORDS> {
 }
 impl<const WORDS: usize> Shl<usize> for BitSet<WORDS> {
     type Output = Self;
-    fn shl(self, rhs: usize) -> Self {
+    fn shl(
+        self,
+        rhs: usize,
+    ) -> Self {
         self.shifted_left(rhs)
     }
 }
 impl<const WORDS: usize> Shr<usize> for BitSet<WORDS> {
     type Output = Self;
-    fn shr(self, rhs: usize) -> Self {
+    fn shr(
+        self,
+        rhs: usize,
+    ) -> Self {
         self.shifted_right(rhs)
     }
 }
@@ -218,7 +276,11 @@ mod tests {
         let other = BitSet::from_words([1, 1]);
         assert!(bits.intersects(&other));
         assert!(!bits.is_disjoint(&other));
-        assert_eq!(bits.difference(&other).count_ones(), 0);
+        assert_eq!(
+            bits.difference(&other)
+                .count_ones(),
+            0
+        );
         assert_eq!((bits & other).words(), &[1, 1]);
         assert_eq!((bits ^ other).count_ones(), 0);
         assert_eq!((!bits).words(), &[!1, !1]);

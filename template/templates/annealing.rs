@@ -1,5 +1,5 @@
 // Copy this file to `src/main.rs` after copying the required crate modules.
-use atcoder_heuristic::{anneal, AnnealConfig, Random};
+use atcoder_heuristic::{anneal, AnnealConfig, Input, Output, Random};
 
 #[derive(Clone)]
 struct State {
@@ -13,6 +13,9 @@ struct Move {
 }
 
 fn main() {
+    let mut input = Input::new();
+    let _ = &mut input;
+    let mut output = Output::new();
     // TODO: problem specific input and initial solution
     let initial = State { score: 0 };
     let config = AnnealConfig::new(1900, 100.0, 1.0);
@@ -32,5 +35,6 @@ fn main() {
         },
     );
     // TODO: problem specific output
-    println!("{}", result.score);
+    output.println(result.score);
+    output.flush();
 }

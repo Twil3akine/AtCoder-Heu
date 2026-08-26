@@ -1,4 +1,4 @@
-use crate::Random;
+use crate::random::Random;
 
 /// Difference-updatable Zobrist table for `position x value` states.
 pub struct Zobrist {
@@ -8,7 +8,11 @@ pub struct Zobrist {
 }
 
 impl Zobrist {
-    pub fn new(positions: usize, values: usize, seed: u64) -> Self {
+    pub fn new(
+        positions: usize,
+        values: usize,
+        seed: u64,
+    ) -> Self {
         assert!(values > 0, "zobrist needs at least one value");
         let table_len = positions
             .checked_mul(values)
@@ -33,7 +37,11 @@ impl Zobrist {
     }
 
     #[inline]
-    pub fn key(&self, position: usize, value: usize) -> u64 {
+    pub fn key(
+        &self,
+        position: usize,
+        value: usize,
+    ) -> u64 {
         assert!(
             position < self.positions && value < self.values,
             "zobrist index out of range"
@@ -41,7 +49,10 @@ impl Zobrist {
         self.table[position * self.values + value]
     }
 
-    pub fn hash_values(&self, values: &[usize]) -> u64 {
+    pub fn hash_values(
+        &self,
+        values: &[usize],
+    ) -> u64 {
         assert_eq!(values.len(), self.positions, "wrong state length");
         values
             .iter()
@@ -52,7 +63,13 @@ impl Zobrist {
     }
 
     #[inline]
-    pub fn update(&self, hash: u64, position: usize, old_value: usize, new_value: usize) -> u64 {
+    pub fn update(
+        &self,
+        hash: u64,
+        position: usize,
+        old_value: usize,
+        new_value: usize,
+    ) -> u64 {
         hash ^ self.key(position, old_value) ^ self.key(position, new_value)
     }
 }

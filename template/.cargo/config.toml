@@ -1,0 +1,5 @@
+[alias]
+bundle = "run --quiet --manifest-path tools/bundler/Cargo.toml --"
+
+[build]
+target-dir = "target"
