@@ -1,0 +1,8 @@
+# メソッドチェーンを1メソッドずつ改行
+chain_width = 1
+
+# 関数呼び出しの引数を1引数ずつ改行
+fn_call_width = 40
+
+# 関数定義の引数を1引数ずつ改行
+fn_params_layout = "Vertical"

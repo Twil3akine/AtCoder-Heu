@@ -1,0 +1,6 @@
+# Keep this repository limited to the shared AHC template files.
+/*
+!/.gitignore
+!/AGENTS.md
+!/rustfmt.toml
+!/template/
